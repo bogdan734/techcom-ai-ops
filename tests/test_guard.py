@@ -8,6 +8,7 @@ OWNER_FACTS = MessageFacts.grounded_in(
     task_id="TC-1001",
     recipient="John Smith",
     recipient_kind="owner",
+    status="Working on it",
     phrases=["Fiber splicing", "SURF Illinois", "John Smith", "Working on it"],
     context=["Overdue by 3 days, no explanation in notes", "No update since Monday."],
     dates=["2026-10-18", "2026-10-16", "2026-10-21"],
@@ -18,6 +19,7 @@ ROLE_FACTS = MessageFacts.grounded_in(
     task_id="TC-1002",
     recipient="warehouse",
     recipient_kind="role",
+    status="Blocked",
     phrases=["Install handholes", "SURF Illinois", "Maria Cruz", "Blocked"],
     context=["warehouse", "Waiting on materials, overdue by 3 days"],
     dates=["2026-10-18"],
@@ -78,7 +80,12 @@ def test_a_grounded_message_passes():
         (GOOD + " Can you close it and cancel the rest?", "claims, requests or suggests"),
         (GOOD + " Otherwise procurement takes it over.", "claims, requests or suggests"),
         (GOOD + " Reply within 3 hours.", "'3 hours' is not in the task data"),
-        (GOOD + " Please finish it within twelve hours.", "states a duration"),
+        (GOOD + " Please finish it within twelve hours.", "sets a deadline"),
+        (GOOD + " Please finish it within twelve hours.", "'12 hours' is not in the task data"),
+        (GOOD + " Please finish it within 3 days.", "sets a deadline"),
+        (GOOD + " Please send it 2 days from now.", "sets a deadline"),
+        (GOOD + " Kevin says the splice kit is ready.", "names Kevin"),
+        (GOOD + " Bob will help on site.", "names Bob"),
         (GOOD + " You have a fortnight.", "states a duration"),
         (GOOD + " Please finish by noon.", "uses a weekday, time of day or relative date"),
         (GOOD + " Reply by 5 pm.", "uses a weekday, time of day or relative date"),
@@ -155,3 +162,19 @@ def test_templates_quote_unusual_task_data_without_failing_the_checks(title, own
             message = render_message(facts)
 
             assert check_message(message, message_limits(facts, {"Maria Cruz"})) == [], message
+
+
+@pytest.mark.parametrize(
+    ("message", "facts"),
+    [
+        (GOOD.replace("3 days overdue", "three days overdue"), OWNER_FACTS),
+        (
+            'Hello, TC-1002 "Install handholes" has been blocked since 2026-10-18. Could you '
+            "confirm a delivery date once the materials are on hand to install?",
+            ROLE_FACTS,
+        ),
+        ("Hi John, TC-1001 is still in progress and 3 days overdue. Thanks!", OWNER_FACTS),
+    ],
+)
+def test_grounded_phrasings_a_model_would_use_are_accepted(message, facts):
+    assert check_message(message, facts) == []

@@ -51,6 +51,10 @@ class RunReport:
         return 2 if any(o.delivery in unsettled for o in self.outcomes) else 0
 
 
+# Recorded instead of a decision when the decision depends on a note nobody could read.
+ON_HOLD = "on_hold"
+
+
 class FollowUpService:
     def __init__(
         self,
@@ -78,40 +82,42 @@ class FollowUpService:
         reading = self.reader.read(task, needed=assessment.needs_reading, flagged=note_flagged)
         verdict = decide(assessment, reading.blocker, self.policy)
         flags = sorted({*reading.flags, *([INJECTION_FLAG] if flagged else [])})
-        outcome = TaskOutcome(
-            task_id=task.task_id,
-            decision=verdict.decision.value,
-            target=verdict.target,
-            reason=verdict.reason,
-            project=task.project,
-            task=task.title,
-            note_reading={"blocker": reading.blocker.value, "source": reading.source},
-            flags=[*flags, *(f"data: {issue}" for issue in task.issues)],
-        )
         actionable = verdict.decision is not Decision.NO_ACTION and verdict.target is not None
         # The note decides who hears about this task; without a trustworthy reading the
         # service holds it rather than acting on a guess it might contradict next run.
         held = actionable and reading.source == "unavailable"
-        summary = f"{verdict.decision.value}" + (f" -> {verdict.target}" if verdict.target else "")
+        decision, target, reason = (
+            (
+                ON_HOLD,
+                None,
+                "Its note decides who to contact and could not be read; retried next run",
+            )
+            if held
+            else (verdict.decision.value, verdict.target, verdict.reason)
+        )
+        outcome = TaskOutcome(
+            task_id=task.task_id,
+            decision=decision,
+            target=target,
+            reason=reason,
+            project=task.project,
+            task=task.title,
+            delivery="deferred" if held else "none",
+            note_reading={"blocker": reading.blocker.value, "source": reading.source},
+            flags=[*flags, *(f"data: {issue}" for issue in task.issues)],
+        )
         emit(
             "decision",
-            f"{task.task_id}: held until its note can be read (on dates alone: {summary})"
-            if held
-            else f"{task.task_id}: {summary} ({verdict.reason})",
+            f"{task.task_id}: {decision}" + (f" -> {target}" if target else "") + f" ({reason})",
             level=logging.WARNING if held else logging.INFO,
             task_id=task.task_id,
-            decision=verdict.decision.value,
-            target=verdict.target,
-            reason=verdict.reason,
-            held=held,
+            decision=decision,
+            target=target,
+            reason=reason,
             note_reading=outcome.note_reading,
             flags=outcome.flags,
         )
-        if not actionable:
-            return outcome
-        if held:
-            outcome.delivery = "deferred"
-            outcome.reason += "; held until the note can be read"
+        if held or not actionable:
             return outcome
 
         outcome.action_id = action_id(task, verdict)

@@ -132,6 +132,7 @@ def message_limits(facts: Mapping[str, Any], people: Set[str]) -> MessageFacts:
         task_id=facts["task_id"],
         recipient=facts["recipient"] or "",
         recipient_kind=facts["recipient_kind"] or "role",
+        status=facts["status"],
         phrases=[facts[name] for name in ("task", "project", "owner", "status_raw") if facts[name]],
         context=[
             text.replace("_", " ")

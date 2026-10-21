@@ -147,6 +147,9 @@ def test_garbage_from_the_model_holds_note_dependent_tasks_and_sends_the_rest(se
     # Blocked or late tasks are routed by their note: without a trustworthy reading
     # nothing is sent on a guess (no warehouse ETA request, no generic reminder).
     assert held == {"TC-1001", "TC-1002", "TC-1008", "TC-1009"}
+    # Held tasks carry no decision taken on dates alone: no recipient, no message.
+    assert {by_id[t].decision for t in held} == {"on_hold"}
+    assert {by_id[t].target for t in held} == {None}
     assert by_id["TC-1002"].message is None
     assert by_id["TC-1002"].flags == ["note_unread"]
     # Tasks decided on dates and status alone still go out, with template wording.

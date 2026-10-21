@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from functools import lru_cache
 
 INJECTION_FLAG = "prompt_injection_suspected"
 
@@ -34,7 +35,6 @@ _ISO_DATE = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
 _NUMBER = re.compile(r"\d+(?:[.,]\d+)?")
 _QUANTITY = re.compile(r"\b(\d+)\s*-?\s*(day|hour|hr|minute|min|week|month|year)s?\b", re.I)
 _WORD = re.compile(r"[A-Za-z]+")
-_SENTENCE = re.compile(r"(?<=[.!?])\s+|\n+")
 _MONTH = (
     r"(jan(uary)?|feb(ruary)?|mar(ch)?|apr(il)?|may|june?|july?|aug(ust)?|"
     r"sep(t(ember)?)?|oct(ober)?|nov(ember)?|dec(ember)?)"
@@ -52,30 +52,64 @@ _RELATIVE_DATE = re.compile(
     r"|\b\d{1,2}(:\d{2})?\s*(a\.?m\.?|p\.?m\.?)(?![a-z])",
     re.IGNORECASE,
 )
-_SPELLED_DURATION = re.compile(
-    r"\b(a|an|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|"
-    r"twenty|thirty|forty|forty-eight|seventy-two|several|a couple of|a few|half an?|another)"
-    r"\s+(more\s+)?((business|working)\s+)?(hours?|hrs?|minutes?|days?|weeks?|months?)\b"
-    r"|\bfortnight\b",
+_SPELLED_NUMBERS = {
+    "a": 1, "an": 1, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6,
+    "seven": 7, "eight": 8, "nine": 9, "ten": 10, "eleven": 11, "twelve": 12, "fifteen": 15,
+    "twenty": 20, "thirty": 30, "forty": 40, "forty-eight": 48, "seventy-two": 72,
+}  # fmt: skip
+_NUMBER_WORDS = "|".join(sorted(_SPELLED_NUMBERS, key=len, reverse=True))
+_UNIT = r"(?P<unit>day|hour|hr|minute|min|week|month|year)s?\b"
+_SPELLED_QUANTITY = re.compile(
+    rf"\b(?P<count>{_NUMBER_WORDS})\s+(more\s+)?((business|working)\s+)?{_UNIT}", re.I
+)
+_VAGUE_DURATION = re.compile(
+    r"\b(several|a couple of|a few|few|half an?|another|many)\s+(more\s+)?"
+    r"((business|working)\s+)?(hours?|hrs?|minutes?|days?|weeks?|months?)\b|\bfortnight\b",
     re.IGNORECASE,
 )
-_STATE = (
-    r"(complete|completed|done|closed|finished|resolved|blocked|not started|in progress|"
-    r"working on it|on hold|cancell?ed)"
+_DEADLINE = re.compile(
+    rf"(?<!due )\b(within|in|over the next|in the next|for the next)\s+(\d+|{_NUMBER_WORDS})\s+"
+    r"(more\s+)?((business|working)\s+)?(hours?|hrs?|minutes?|mins?|days?|weeks?|months?)\b"
+    rf"|\b(\d+|{_NUMBER_WORDS})\s+(hours?|days?|weeks?)\s+from\s+(now|today)\b",
+    re.IGNORECASE,
 )
-_STATUS_CHANGE = re.compile(
-    rf"\b(has|have|had) been (marked )?(as )?{_STATE}\b"
-    rf"|\b(is|are) now (marked )?(as )?{_STATE}\b"
-    rf"|\bmark(s|ed|ing)?\b[^.]{{0,30}}\b{_STATE}\b"
-    rf"|\bstatus\b[^.]{{0,20}}\b(to|as)\b\W{{0,2}}{_STATE}\b"
-    rf"|\b(set|change|switch|move|update)\b[^.]{{0,30}}\b(to|as)\b\W{{0,2}}{_STATE}\b"
+_STATES = (
+    "complete", "completed", "done", "closed", "finished", "resolved", "blocked",
+    "not started", "in progress", "working on it", "on hold", "cancelled", "canceled",
+)  # fmt: skip
+# Saying that a task has its current status is not a status change.
+_CURRENT = {
+    "Blocked": {"blocked"},
+    "Not Started": {"not started"},
+    "Working on it": {"in progress", "working on it"},
+}
+_HAND_OVER = (
+    r"|(?<!on )(?<!at )(?<!in )\bhand(s|ed|ing)?\s+"
+    r"((it|this|that|them|the task|the work|everything)\s+)?(over|off|to)\b"
+)
+_OTHER_CHANGES = (
     r"|\bclos(e|es|ed|ing)\s+(it|this|that|out|the task|this task|the ticket)\b"
     r"|\bcancel(s|l?ed|l?ing|lation)?\b"
-    r"|\bhand(s|ed|ing)?\b[^.]{0,20}\b(over|off|to)\b"
     r"|\btak(e|es|en|ing)\b[^.]{0,15}\bover\b"
-    r"|\bre-?assign(s|ed|ing|ment)?\b",
-    re.IGNORECASE,
+    r"|\bre-?assign(s|ed|ing|ment)?\b"
 )
+
+
+@lru_cache(maxsize=8)
+def _status_change(current: str) -> re.Pattern[str]:
+    states = "(" + "|".join(s for s in _STATES if s not in _CURRENT.get(current, set())) + ")"
+    return re.compile(
+        rf"\b(has|have|had) been (marked )?(as )?{states}\b"
+        rf"|\b(is|are) now (marked )?(as )?{states}\b"
+        rf"|\bmark(s|ed|ing)?\b[^.]{{0,30}}\b{states}\b"
+        rf"|\bstatus\b[^.]{{0,20}}\b(to|as)\b\W{{0,2}}{states}\b"
+        rf"|\b(set|change|switch|move|update)\b[^.]{{0,30}}\b(to|as)\b\W{{0,2}}{states}\b"
+        + _HAND_OVER
+        + _OTHER_CHANGES,
+        re.IGNORECASE,
+    )
+
+
 _LINK = re.compile(r"https?://|www\.|\b[\w.+-]+@[\w-]+\.[\w.]+\b", re.IGNORECASE)
 _PLACEHOLDER = re.compile(r"\{[^}]*\}|\[[^\]]*\]|<[^>]*>")
 _GREETING = re.compile(
@@ -83,16 +117,24 @@ _GREETING = re.compile(
     re.IGNORECASE,
 )
 _ROLE_GREETINGS = {"team", "all", "there", "everyone"}
-# Capitalised words and acronyms a message may use without the task data naming them.
+# Capitalised words a message may use without the task data naming them: greetings,
+# sentence openers and the vocabulary of a follow-up. Anything else must come from the data.
 _COMMON_TEXT = """
-    hi hello hey dear good morning afternoon evening please could can would will may might
-    should kindly thanks thank regards best kind cheers the this that these those it its we
-    our us you your they their there here if once when as so also and but or for to let just
-    note quick reminder regarding re hope sorry any no yes what who which how why where given
-    based due since because following per after before until while currently update status
-    task project owner team all everyone escalating escalation overdue blocked done not
-    started working on in at by of with from about materials material delivery manager
-    warehouse coordinator operations procurement site field crew
+    hi hello hey dear good morning afternoon evening please kindly thanks thank regards best
+    kind cheers sorry apologies hope reply confirm share send let could would can will may
+    might must should shall do does did is are was were has have had the a an this that these
+    those it its we our us me my you your they their he she his her there here if once when
+    while as so also and but or for to of in on at by with from about without until since
+    given because although though even still only both each every some any more other another
+    such same again soon already ideally currently now today then however meanwhile otherwise
+    unfortunately note just quick reminder following regarding re per what who which how why
+    where no yes appreciate appreciated grateful ensure make sure check see call contact
+    coordinate plan schedule reschedule provide give tell advise inform flag raise escalate
+    escalating escalation follow looking checking chasing waiting awaiting urgent important
+    action required needed request requesting asked asking update status task tasks project
+    owner team all everyone overdue blocked done not started working materials material
+    delivery deliveries manager warehouse coordinator operations procurement site field crew
+    finish complete review help due ask keep get try use start proceed continue resume
 """
 _COMMON_WORDS = frozenset(_COMMON_TEXT.split())
 _ACRONYMS = frozenset({"eta", "pm", "id", "ok", "fyi", "asap", "utc"})
@@ -112,6 +154,7 @@ class MessageFacts:
     task_id: str
     recipient: str
     recipient_kind: str  # "owner" or "role"
+    status: str  # the task's current status, which a message may state
     phrases: tuple[str, ...]  # task fields a message may quote verbatim (title, owner, ...)
     allowed_dates: frozenset[str]
     allowed_numbers: frozenset[str]
@@ -125,6 +168,7 @@ class MessageFacts:
         task_id: str,
         recipient: str,
         recipient_kind: str,
+        status: str,
         phrases: list[str],
         context: list[str],
         dates: list[str],
@@ -142,6 +186,7 @@ class MessageFacts:
             task_id=task_id,
             recipient=recipient,
             recipient_kind=recipient_kind,
+            status=status,
             phrases=tuple(sorted({p for p in phrases if p}, key=len, reverse=True)),
             allowed_dates=frozenset(dates),
             allowed_numbers=frozenset(
@@ -186,9 +231,11 @@ def check_message(message: str, facts: MessageFacts) -> list[str]:
         problems.append(f"number {number} is not in the task data")
     for count, unit in sorted(_quantities(digits) - facts.allowed_quantities):
         problems.append(f"'{count} {unit}s' is not in the task data")
-    if _SPELLED_DURATION.search(rest):
+    if _VAGUE_DURATION.search(rest):
         problems.append("states a duration the task data does not contain")
-    if _STATUS_CHANGE.search(rest):
+    if _DEADLINE.search(rest):
+        problems.append("sets a deadline the task data does not contain")
+    if _status_change(facts.status).search(rest):
         problems.append("claims, requests or suggests a status change, hand-over or reassignment")
     if _LINK.search(rest):
         problems.append("contains a link or an e-mail address")
@@ -205,29 +252,23 @@ def check_message(message: str, facts: MessageFacts) -> list[str]:
 
 
 def _quantities(text: str) -> set[tuple[str, str]]:
+    """("3", "day") for "3 days", "3-day" or "three days"."""
     units = {"hr": "hour", "min": "minute"}
-    return {
-        (count, units.get(unit.lower(), unit.lower())) for count, unit in _QUANTITY.findall(text)
-    }
+    found = {(count, unit.lower()) for count, unit in _QUANTITY.findall(text)}
+    for match in _SPELLED_QUANTITY.finditer(text):
+        found.add((str(_SPELLED_NUMBERS[match["count"].lower()]), match["unit"].lower()))
+    return {(count, units.get(unit, unit)) for count, unit in found}
 
 
 def _unknown_names(text: str, facts: MessageFacts) -> list[str]:
-    """Names and acronyms that neither the task data nor plain English explains.
-
-    A capital letter at the start of a sentence is grammar, not a name, so those words are
-    skipped; acronyms are checked wherever they stand.
-    """
+    """Capitalised words and acronyms that neither the task data nor plain English explains."""
     names = set()
-    for sentence in _SENTENCE.split(text):
-        for position, word in enumerate(_WORD.findall(sentence)):
-            lowered = word.lower()
-            if len(word) < 2 or not word[0].isupper() or lowered in facts.known_words:
-                continue
-            if word.isupper():
-                if lowered not in _ACRONYMS:
-                    names.add(word)
-            elif position > 0 and lowered not in _COMMON_WORDS:
-                names.add(word)
+    for word in _WORD.findall(text):
+        lowered = word.lower()
+        if len(word) < 2 or not word[0].isupper() or lowered in facts.known_words:
+            continue
+        if lowered not in (_ACRONYMS if word.isupper() else _COMMON_WORDS):
+            names.add(word)
     return sorted(names)
 
 
