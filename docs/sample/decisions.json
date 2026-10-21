@@ -1,0 +1,184 @@
+[
+  {
+    "task_id": "TC-1001",
+    "decision": "follow_up_owner",
+    "target": "John Smith",
+    "reason": "Overdue by 3 days, no explanation in notes",
+    "message": "Hi John, TC-1001 \"Fiber splicing\" (SURF Illinois) was due on 2026-10-18 and is 3 days overdue. Please reply with the current status and a realistic completion date.",
+    "project": "SURF Illinois",
+    "task": "Fiber splicing",
+    "delivery": "sent",
+    "message_id": "msg-0001",
+    "action_id": "a438513783d4d804681ac552671e65b5",
+    "drafted_by": "stub",
+    "note_reading": {
+      "blocker": "none",
+      "source": "model"
+    },
+    "flags": []
+  },
+  {
+    "task_id": "TC-1002",
+    "decision": "request_eta",
+    "target": "warehouse",
+    "reason": "Waiting on materials, overdue by 3 days",
+    "message": "Hello, TC-1002 \"Install handholes\" (SURF Illinois) is blocked waiting for materials and is 3 days past its due date of 2026-10-18. Please confirm the expected delivery date so Maria Cruz can re-plan the work.",
+    "project": "SURF Illinois",
+    "task": "Install handholes",
+    "delivery": "sent",
+    "message_id": "msg-0002",
+    "action_id": "6feae298eded94f420882f212db7e84f",
+    "drafted_by": "stub",
+    "note_reading": {
+      "blocker": "materials",
+      "source": "model"
+    },
+    "flags": []
+  },
+  {
+    "task_id": "TC-1003",
+    "decision": "no_action",
+    "target": null,
+    "reason": "Task is done",
+    "message": null,
+    "project": "Michigan Expansion",
+    "task": "Conduit inspection",
+    "delivery": "none",
+    "message_id": null,
+    "action_id": null,
+    "drafted_by": null,
+    "note_reading": {
+      "blocker": "unknown",
+      "source": "not_needed"
+    },
+    "flags": []
+  },
+  {
+    "task_id": "TC-1004",
+    "decision": "clarify_missing_info",
+    "target": "project_manager",
+    "reason": "Missing owner",
+    "message": "Hello, TC-1004 \"Permit review\" (Wisconsin Build) has no owner. Please assign an owner so the work can be tracked.",
+    "project": "Wisconsin Build",
+    "task": "Permit review",
+    "delivery": "sent",
+    "message_id": "msg-0003",
+    "action_id": "b2daf554eaf87c3fa70fb5829b3862ce",
+    "drafted_by": "stub",
+    "note_reading": {
+      "blocker": "unknown",
+      "source": "not_needed"
+    },
+    "flags": []
+  },
+  {
+    "task_id": "TC-1005",
+    "decision": "clarify_missing_info",
+    "target": "project_manager",
+    "reason": "Missing due date",
+    "message": "Hello, TC-1005 \"As-built drawings\" (Indiana OSP) has no due date. Please set a due date so the work can be tracked.",
+    "project": "Indiana OSP",
+    "task": "As-built drawings",
+    "delivery": "sent",
+    "message_id": "msg-0004",
+    "action_id": "9ce913cc9b398b489907805f310e6974",
+    "drafted_by": "stub",
+    "note_reading": {
+      "blocker": "unknown",
+      "source": "not_needed"
+    },
+    "flags": []
+  },
+  {
+    "task_id": "TC-1006",
+    "decision": "follow_up_owner",
+    "target": "Jamie Lee",
+    "reason": "Overdue by 1 day",
+    "message": "Hi Jamie, TC-1006 \"Splice verification\" (Minnesota Fiber) was due on 2026-10-20 and is 1 day overdue. Please reply with the current status and a realistic completion date.",
+    "project": "Minnesota Fiber",
+    "task": "Splice verification",
+    "delivery": "sent",
+    "message_id": "msg-0005",
+    "action_id": "d698f67656c0b4b2306b6c80b8a3ca96",
+    "drafted_by": "template",
+    "note_reading": {
+      "blocker": "unknown",
+      "source": "flagged"
+    },
+    "flags": [
+      "prompt_injection_suspected"
+    ]
+  },
+  {
+    "task_id": "TC-1007",
+    "decision": "no_action",
+    "target": null,
+    "reason": "On track, due in 6 days",
+    "message": null,
+    "project": "Indiana OSP",
+    "task": "Site readiness",
+    "delivery": "none",
+    "message_id": null,
+    "action_id": null,
+    "drafted_by": null,
+    "note_reading": {
+      "blocker": "unknown",
+      "source": "not_needed"
+    },
+    "flags": []
+  },
+  {
+    "task_id": "TC-1008",
+    "decision": "escalate",
+    "target": "project_manager",
+    "reason": "Waiting on a dependency, overdue by 6 days",
+    "message": "Hello, escalating TC-1008 \"Test fiber signal\" (SURF Illinois), owned by Chris Patel: waiting on a dependency, overdue by 6 days. Please review it and help unblock or re-plan the work.",
+    "project": "SURF Illinois",
+    "task": "Test fiber signal",
+    "delivery": "sent",
+    "message_id": "msg-0006",
+    "action_id": "f1e322fa3af43f6086c356672fee5792",
+    "drafted_by": "stub",
+    "note_reading": {
+      "blocker": "dependency",
+      "source": "model"
+    },
+    "flags": []
+  },
+  {
+    "task_id": "TC-1009",
+    "decision": "request_eta",
+    "target": "warehouse",
+    "reason": "Waiting on materials, due today",
+    "message": "Hello, TC-1009 \"Material reconciliation\" (Michigan Expansion) is blocked waiting for materials and is due today (2026-10-21). Please confirm the expected delivery date so Dana Fox can re-plan the work.",
+    "project": "Michigan Expansion",
+    "task": "Material reconciliation",
+    "delivery": "sent",
+    "message_id": "msg-0007",
+    "action_id": "ca6d939937fb971e051bfe54be580eba",
+    "drafted_by": "stub",
+    "note_reading": {
+      "blocker": "materials",
+      "source": "model"
+    },
+    "flags": []
+  },
+  {
+    "task_id": "TC-1010",
+    "decision": "no_action",
+    "target": null,
+    "reason": "Task is done",
+    "message": null,
+    "project": "Wisconsin Build",
+    "task": "Closeout photos",
+    "delivery": "none",
+    "message_id": null,
+    "action_id": null,
+    "drafted_by": null,
+    "note_reading": {
+      "blocker": "unknown",
+      "source": "not_needed"
+    },
+    "flags": []
+  }
+]

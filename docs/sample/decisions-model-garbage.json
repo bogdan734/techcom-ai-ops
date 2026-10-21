@@ -1,0 +1,192 @@
+[
+  {
+    "task_id": "TC-1001",
+    "decision": "follow_up_owner",
+    "target": "John Smith",
+    "reason": "Overdue by 3 days; held until the note can be read",
+    "message": null,
+    "project": "SURF Illinois",
+    "task": "Fiber splicing",
+    "delivery": "deferred",
+    "message_id": null,
+    "action_id": null,
+    "drafted_by": null,
+    "note_reading": {
+      "blocker": "unknown",
+      "source": "unavailable"
+    },
+    "flags": [
+      "note_unread"
+    ]
+  },
+  {
+    "task_id": "TC-1002",
+    "decision": "follow_up_owner",
+    "target": "Maria Cruz",
+    "reason": "Blocked, blocker not stated, overdue by 3 days; held until the note can be read",
+    "message": null,
+    "project": "SURF Illinois",
+    "task": "Install handholes",
+    "delivery": "deferred",
+    "message_id": null,
+    "action_id": null,
+    "drafted_by": null,
+    "note_reading": {
+      "blocker": "unknown",
+      "source": "unavailable"
+    },
+    "flags": [
+      "note_unread"
+    ]
+  },
+  {
+    "task_id": "TC-1003",
+    "decision": "no_action",
+    "target": null,
+    "reason": "Task is done",
+    "message": null,
+    "project": "Michigan Expansion",
+    "task": "Conduit inspection",
+    "delivery": "none",
+    "message_id": null,
+    "action_id": null,
+    "drafted_by": null,
+    "note_reading": {
+      "blocker": "unknown",
+      "source": "not_needed"
+    },
+    "flags": []
+  },
+  {
+    "task_id": "TC-1004",
+    "decision": "clarify_missing_info",
+    "target": "project_manager",
+    "reason": "Missing owner",
+    "message": "Hello, TC-1004 \"Permit review\" (Wisconsin Build) has no owner. Please assign an owner so the work can be tracked.",
+    "project": "Wisconsin Build",
+    "task": "Permit review",
+    "delivery": "sent",
+    "message_id": "msg-0001",
+    "action_id": "b2daf554eaf87c3fa70fb5829b3862ce",
+    "drafted_by": "template",
+    "note_reading": {
+      "blocker": "unknown",
+      "source": "not_needed"
+    },
+    "flags": []
+  },
+  {
+    "task_id": "TC-1005",
+    "decision": "clarify_missing_info",
+    "target": "project_manager",
+    "reason": "Missing due date",
+    "message": "Hello, TC-1005 \"As-built drawings\" (Indiana OSP) has no due date. Please set a due date so the work can be tracked.",
+    "project": "Indiana OSP",
+    "task": "As-built drawings",
+    "delivery": "sent",
+    "message_id": "msg-0002",
+    "action_id": "9ce913cc9b398b489907805f310e6974",
+    "drafted_by": "template",
+    "note_reading": {
+      "blocker": "unknown",
+      "source": "not_needed"
+    },
+    "flags": []
+  },
+  {
+    "task_id": "TC-1006",
+    "decision": "follow_up_owner",
+    "target": "Jamie Lee",
+    "reason": "Overdue by 1 day",
+    "message": "Hi Jamie, TC-1006 \"Splice verification\" (Minnesota Fiber) was due on 2026-10-20 and is 1 day overdue. Please reply with the current status and a realistic completion date.",
+    "project": "Minnesota Fiber",
+    "task": "Splice verification",
+    "delivery": "sent",
+    "message_id": "msg-0003",
+    "action_id": "d698f67656c0b4b2306b6c80b8a3ca96",
+    "drafted_by": "template",
+    "note_reading": {
+      "blocker": "unknown",
+      "source": "flagged"
+    },
+    "flags": [
+      "prompt_injection_suspected"
+    ]
+  },
+  {
+    "task_id": "TC-1007",
+    "decision": "no_action",
+    "target": null,
+    "reason": "On track, due in 6 days",
+    "message": null,
+    "project": "Indiana OSP",
+    "task": "Site readiness",
+    "delivery": "none",
+    "message_id": null,
+    "action_id": null,
+    "drafted_by": null,
+    "note_reading": {
+      "blocker": "unknown",
+      "source": "not_needed"
+    },
+    "flags": []
+  },
+  {
+    "task_id": "TC-1008",
+    "decision": "escalate",
+    "target": "project_manager",
+    "reason": "Overdue by 6 days, escalation threshold is 5 days; held until the note can be read",
+    "message": null,
+    "project": "SURF Illinois",
+    "task": "Test fiber signal",
+    "delivery": "deferred",
+    "message_id": null,
+    "action_id": null,
+    "drafted_by": null,
+    "note_reading": {
+      "blocker": "unknown",
+      "source": "unavailable"
+    },
+    "flags": [
+      "note_unread"
+    ]
+  },
+  {
+    "task_id": "TC-1009",
+    "decision": "follow_up_owner",
+    "target": "Dana Fox",
+    "reason": "Blocked, blocker not stated, due today; held until the note can be read",
+    "message": null,
+    "project": "Michigan Expansion",
+    "task": "Material reconciliation",
+    "delivery": "deferred",
+    "message_id": null,
+    "action_id": null,
+    "drafted_by": null,
+    "note_reading": {
+      "blocker": "unknown",
+      "source": "unavailable"
+    },
+    "flags": [
+      "note_unread"
+    ]
+  },
+  {
+    "task_id": "TC-1010",
+    "decision": "no_action",
+    "target": null,
+    "reason": "Task is done",
+    "message": null,
+    "project": "Wisconsin Build",
+    "task": "Closeout photos",
+    "delivery": "none",
+    "message_id": null,
+    "action_id": null,
+    "drafted_by": null,
+    "note_reading": {
+      "blocker": "unknown",
+      "source": "not_needed"
+    },
+    "flags": []
+  }
+]
