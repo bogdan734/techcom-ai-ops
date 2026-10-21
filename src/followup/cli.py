@@ -7,7 +7,7 @@ import os
 import sys
 from collections.abc import Sequence
 
-from dotenv import load_dotenv
+from dotenv import find_dotenv, load_dotenv
 
 from .config import PROVIDERS, ConfigError, Settings
 from .faults import ROUTES, FaultSpecError, parse_faults
@@ -45,7 +45,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    load_dotenv()
+    # The .env of the directory the command runs in, not of wherever the package is installed.
+    load_dotenv(find_dotenv(usecwd=True))
     overrides = {
         "TASKS_FILE": args.tasks,
         "OUT_DIR": args.out,
