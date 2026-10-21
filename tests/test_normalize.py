@@ -68,14 +68,28 @@ def test_ambiguous_or_invalid_dates_are_not_guessed(value):
     assert task.issues == (f"due_date {value!r} is not an ISO date",)
 
 
-def test_task_id_is_trimmed_and_uppercased():
-    assert make_task(task_id=" tc-1001 ").task_id == "TC-1001"
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [(" tc-1001 ", "TC-1001"), ("Task  7", "TASK 7"), ("ab#3", "AB#3"), (1001, "1001")],
+)
+def test_task_id_is_trimmed_and_uppercased_but_otherwise_kept(raw, expected):
+    assert make_task(task_id=raw).task_id == expected
 
 
-@pytest.mark.parametrize("value", [None, "", True, "TC 1001", {"id": 1}])
+@pytest.mark.parametrize("value", [None, "", "   ", True, {"id": 1}, "X" * 65])
 def test_record_without_usable_id_is_rejected(value):
     with pytest.raises(InvalidRecord):
         normalise_task(raw_task(task_id=value))
+
+
+def test_long_titles_are_bounded_because_they_reach_prompts_and_messages():
+    task = make_task(task="T" * 500, project="P" * 300)
+
+    assert (len(task.title), len(task.project)) == (200, 200)
+    assert task.issues == (
+        "project truncated to 200 characters",
+        "task truncated to 200 characters",
+    )
 
 
 def test_notes_are_cleaned_and_bounded():

@@ -14,6 +14,8 @@ from typing import Any
 from .models import Status, Task
 
 MAX_NOTE_LENGTH = 1000
+MAX_TITLE_LENGTH = 200
+MAX_ID_LENGTH = 64
 
 _STATUS_ALIASES = {
     "not started": Status.NOT_STARTED,
@@ -27,7 +29,6 @@ _STATUS_ALIASES = {
     "completed": Status.DONE,
 }
 _NO_OWNER = {"", "null", "none", "n/a", "na", "unassigned", "tbd", "-", "?"}
-_TASK_ID = re.compile(r"^[A-Z0-9][A-Z0-9_.:-]{0,63}$")
 _CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 
 
@@ -41,8 +42,8 @@ def normalise_task(raw: Mapping[str, Any]) -> Task:
     status, status_raw = _status(raw.get("status"), issues)
     return Task(
         task_id=task_id,
-        project=_text(raw.get("project")),
-        title=_text(raw.get("task")),
+        project=_bounded(raw.get("project"), "project", issues),
+        title=_bounded(raw.get("task"), "task", issues),
         owner=_owner(raw.get("assigned_to"), issues),
         status=status,
         status_raw=status_raw,
@@ -90,11 +91,14 @@ def _newer(candidate: Task, current: Task) -> bool:
 
 
 def _task_id(value: Any) -> str:
+    """Trimmed and upper-cased, so ``tc-1001`` and ``TC-1001`` are one task."""
     if not isinstance(value, str | int) or isinstance(value, bool):
         raise InvalidRecord(f"task_id missing or not a string: {value!r}")
-    task_id = str(value).strip().upper()
-    if not _TASK_ID.match(task_id):
-        raise InvalidRecord(f"task_id {value!r} is not a valid identifier")
+    task_id = _text(_CONTROL.sub(" ", str(value))).upper()
+    if not task_id:
+        raise InvalidRecord("task_id is empty")
+    if len(task_id) > MAX_ID_LENGTH:
+        raise InvalidRecord(f"task_id is longer than {MAX_ID_LENGTH} characters")
     return task_id
 
 
@@ -142,6 +146,15 @@ def _notes(value: Any, issues: list[str]) -> str:
         issues.append(f"notes truncated to {MAX_NOTE_LENGTH} characters")
         notes = notes[:MAX_NOTE_LENGTH]
     return notes
+
+
+def _bounded(value: Any, name: str, issues: list[str]) -> str:
+    """Titles reach prompts and messages, so they get the same limits as notes."""
+    text = _text(_CONTROL.sub(" ", value) if isinstance(value, str) else value)
+    if len(text) > MAX_TITLE_LENGTH:
+        issues.append(f"{name} truncated to {MAX_TITLE_LENGTH} characters")
+        text = text[:MAX_TITLE_LENGTH]
+    return text
 
 
 def _text(value: Any) -> str:
