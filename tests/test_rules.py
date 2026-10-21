@@ -134,3 +134,19 @@ def test_thresholds_and_targets_come_from_policy():
     v = decide(assess(make_task(due_date="2026-10-18"), TODAY), Blocker.NONE, policy)
 
     assert (v.decision, v.target) == (Decision.ESCALATE, "ops_lead")
+
+
+@pytest.mark.parametrize(
+    ("due_date", "decision"),
+    [("2026-10-16", Decision.ESCALATE), ("2026-10-17", Decision.FOLLOW_UP_OWNER)],
+)
+def test_escalation_starts_exactly_at_the_threshold(due_date, decision):
+    assert verdict(due_date=due_date).decision is decision  # 5 days overdue vs 4
+
+
+@pytest.mark.parametrize(
+    ("last_update", "decision"),
+    [("2026-10-16", Decision.FOLLOW_UP_OWNER), ("2026-10-17", Decision.NO_ACTION)],
+)
+def test_status_check_starts_exactly_at_the_staleness_threshold(last_update, decision):
+    assert verdict(last_update=last_update).decision is decision  # 5 days without update vs 4

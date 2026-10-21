@@ -8,7 +8,7 @@
 [![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![Anthropic](https://img.shields.io/badge/LLM-Anthropic%20Messages%20API-D97757)](https://docs.anthropic.com/)
 [![SQLite](https://img.shields.io/badge/state-SQLite-003B57?logo=sqlite&logoColor=white)](https://www.sqlite.org/)
-[![Tests](https://img.shields.io/badge/tests-214%20passed-2ea44f)](tests)
+[![Tests](https://img.shields.io/badge/tests-218%20passed-2ea44f)](tests)
 [![License](https://img.shields.io/badge/license-MIT-black)](LICENSE)
 
 Dates and statuses decide **whether** a task needs attention ·
@@ -32,7 +32,7 @@ Solution to the TechCom AI Engineer assessment. The service pulls tasks from a m
 | **Messaging provider down** | 3 deliveries fail after bounded retries, 4 deferred by the circuit breaker; the next run sends all 7, once |
 | **Model down or answering garbage** | the 4 tasks routed by their note are put `on_hold`, the other 3 go out with template wording; the next run finishes the 4, once |
 | **Prompt injection** in TC-1006 | flagged, kept away from the model; the task gets its normal overdue follow-up |
-| **Tests** | 214 in 0.8 s, no network, no API key |
+| **Tests** | 218 in 0.8 s, no network, no API key |
 
 ---
 
@@ -423,12 +423,12 @@ Environment variables, read from `.env` if present ([`.env.example`](.env.exampl
 pytest && ruff check src tests && ruff format --check src tests
 ```
 
-**214 tests, under a second.** The tasks API, the messaging provider and the model are served
+**218 tests, under a second.** The tasks API, the messaging provider and the model are served
 in-process (`httpx2.MockTransport`), so the suite needs no network and no key. The
 Anthropic adapter is tested against a mocked Messages API: request shape, structured output
 config, thinking blocks, refusals, truncation, error classification.
 
-Among the scenarios: every decision rule; ambiguous dates and odd statuses; duplicate and
+Among the scenarios: every decision rule and the exact threshold boundaries; ambiguous dates and odd statuses; duplicate and
 malformed records; a second run with unchanged data; an escalation ladder across days;
 429/503/timeouts on reads; timeout after commit, timeout before commit, a crash between the
 provider commit and the bookkeeping, a lookup outage; the circuit breaker; malformed,
@@ -470,7 +470,7 @@ src/followup/
 ├── mock_api.py          # in-process tasks and messaging APIs
 ├── faults.py            # scripted failures for the APIs and the model
 └── audit.py             # console log and audit.jsonl
-tests/                   # 214 tests, one module per source module
+tests/                   # 218 tests, one module per source module
 fixtures/tasks.json      # the supplied fixture
 docs/sample/             # artefacts of the demo runs
 ```
