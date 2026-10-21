@@ -8,7 +8,7 @@
 [![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![Anthropic](https://img.shields.io/badge/LLM-Anthropic%20Messages%20API-D97757)](https://docs.anthropic.com/)
 [![SQLite](https://img.shields.io/badge/state-SQLite-003B57?logo=sqlite&logoColor=white)](https://www.sqlite.org/)
-[![Tests](https://img.shields.io/badge/tests-206%20passed-2ea44f)](tests)
+[![Tests](https://img.shields.io/badge/tests-214%20passed-2ea44f)](tests)
 [![License](https://img.shields.io/badge/license-MIT-black)](LICENSE)
 
 Dates and statuses decide **whether** a task needs attention ·
@@ -30,9 +30,9 @@ Solution to the TechCom AI Engineer assessment. The service pulls tasks from a m
 | **Second run, same data** | 0 messages, 0 model calls, 7 duplicates suppressed |
 | **Flaky API** (429 and 503 on reads, timeout after a committed send) | still 7 messages; the lost one is reconciled, not resent |
 | **Messaging provider down** | 3 deliveries fail after bounded retries, 4 deferred by the circuit breaker; the next run sends all 7, once |
-| **Model down or answering garbage** | the 4 tasks routed by their note are held, the other 3 go out with template wording; the next run finishes the 4, once |
+| **Model down or answering garbage** | the 4 tasks routed by their note are put `on_hold`, the other 3 go out with template wording; the next run finishes the 4, once |
 | **Prompt injection** in TC-1006 | flagged, kept away from the model; the task gets its normal overdue follow-up |
-| **Tests** | 206 in 0.8 s, no network, no API key |
+| **Tests** | 214 in 0.8 s, no network, no API key |
 
 ---
 
@@ -49,7 +49,7 @@ Solution to the TechCom AI Engineer assessment. The service pulls tasks from a m
 - [Tests and CI](#-tests-and-ci)
 - [Project structure](#-project-structure)
 - [Running it at 10,000 tasks a day](#-running-it-at-10000-tasks-a-day)
-- [Limitations and next steps](#-limitations-and-next-steps)
+- [What is incomplete, and what I would change for production](#-what-is-incomplete-and-what-i-would-change-for-production)
 
 ---
 
@@ -176,7 +176,7 @@ The tasks API failing four times in a row aborts the run before any message is s
 |---|---|
 | `0` | every follow-up that was due is delivered |
 | `1` | the run could not start or could not load tasks; nothing was sent |
-| `2` | the run finished, but some follow-ups are `failed` or `deferred` (provider down, or a note the model could not read) and will go out next run |
+| `2` | the run finished, but some follow-ups are `failed` or `deferred` (provider down, or a task `on_hold` because the model could not read its note) and will go out next run |
 
 ---
 
@@ -206,11 +206,11 @@ Everything a run writes goes to `--out` (default `out/`):
 [audit log](docs/sample/audit.jsonl).
 
 ```text
-00:39:08 | WARNING | GET /tasks: HTTP 429, retry 1/3 in 1.00s
-00:39:09 | WARNING | GET /tasks: HTTP 503, retry 2/3 in 0.51s
-00:39:10 | INFO    | TC-1001: follow_up_owner -> John Smith (Overdue by 3 days, no explanation in notes)
-00:39:10 | WARNING | TC-1001: ReadTimeout on send, outcome unknown; checking with the provider before any retry
-00:39:10 | INFO    | TC-1001: follow_up_owner -> John Smith: already with the provider, recorded as sent (msg-0001)
+00:46:21 | WARNING | GET /tasks: HTTP 429, retry 1/3 in 1.00s
+00:46:22 | WARNING | GET /tasks: HTTP 503, retry 2/3 in 0.92s
+00:46:23 | INFO    | TC-1001: follow_up_owner -> John Smith (Overdue by 3 days, no explanation in notes)
+00:46:23 | WARNING | TC-1001: ReadTimeout on send, outcome unknown; checking with the provider before any retry
+00:46:23 | INFO    | TC-1001: follow_up_owner -> John Smith: already with the provider, recorded as sent (msg-0001)
 ```
 
 ---
@@ -265,20 +265,21 @@ The model has two narrow jobs:
 2. **Drafting the message** ([`drafting.py`](src/followup/drafting.py)) from the facts the
    rules used. Decision, recipient and reason come from the rules; the model returns the
    text only. [`guard.check_message`](src/followup/guard.py) holds the draft to the task
-   data. The task's own title, project and owner may be quoted as they are; beyond those,
-   every date, number, quantity ("3 days"), task id, acronym and mid-sentence name must
-   appear in the facts. A draft may not use weekdays, times of day or relative deadlines,
-   spell out durations, claim or request a status change, a hand-over or a reassignment,
-   greet someone other than the recipient, or contain links and placeholders.
+   data. The task's own title, project, owner and status may be quoted as they are; beyond
+   those, every date, number, quantity ("3 days", "three days"), task id, acronym and
+   capitalised name must appear in the facts. A draft may not set deadlines ("within 2
+   days", "by noon", "5 pm", weekdays), use vague durations, claim or request a status
+   change, a hand-over or a reassignment, greet someone other than the recipient, or contain
+   links and placeholders.
 
 Every answer passes through [`LLMGateway`](src/followup/llm/gateway.py): JSON parsing, a
 strict pydantic model that forbids extra fields, the semantic check, one repair attempt with
 the reasons, a per-run call budget and a circuit breaker. When the model is unavailable or
 keeps answering badly:
 
-- a task whose recipient depends on its note is **held** (`deferred`, exit code 2) and read
-  next run. Acting on dates alone would be a guess the next run could contradict with a
-  second message to someone else;
+- a task whose recipient depends on its note is put **`on_hold`** (no recipient, no message,
+  delivery `deferred`, exit code 2) and read next run. Acting on dates alone would be a
+  guess the next run could contradict with a second message to someone else;
 - every other task goes out with its [template](src/followup/templates.py) message, since
   the wording does not affect what the follow-up is.
 
@@ -368,7 +369,7 @@ it in layers:
   `project_manager` mailbox and materials ETA requests to `warehouse`, both configurable.
   The owner is the only person the service ever addresses by name.
 - **Cadence.** One follow-up per task state and decision; no periodic reminders (see
-  [limitations](#-limitations-and-next-steps)).
+  [limitations](#-what-is-incomplete-and-what-i-would-change-for-production)).
 - **Thresholds.** Escalate at 5 days overdue, status check after 5 days without an update,
   reminder when a task has not started 2 days before its due date. All configurable.
 - **Notes route, they do not trigger.** A note can change who is contacted about a blocked or
@@ -422,7 +423,7 @@ Environment variables, read from `.env` if present ([`.env.example`](.env.exampl
 pytest && ruff check src tests && ruff format --check src tests
 ```
 
-**206 tests, under a second.** The tasks API, the messaging provider and the model are served
+**214 tests, under a second.** The tasks API, the messaging provider and the model are served
 in-process (`httpx2.MockTransport`), so the suite needs no network and no key. The
 Anthropic adapter is tested against a mocked Messages API: request shape, structured output
 config, thinking blocks, refusals, truncation, error classification.
@@ -469,7 +470,7 @@ src/followup/
 ├── mock_api.py          # in-process tasks and messaging APIs
 ├── faults.py            # scripted failures for the APIs and the model
 └── audit.py             # console log and audit.jsonl
-tests/                   # 206 tests, one module per source module
+tests/                   # 214 tests, one module per source module
 fixtures/tasks.json      # the supplied fixture
 docs/sample/             # artefacts of the demo runs
 ```
@@ -511,7 +512,7 @@ audit log is append-only.
 
 ---
 
-## 🧭 Limitations and next steps
+## 🧭 What is incomplete, and what I would change for production
 
 - **Delivery is mocked.** A real e-mail or Slack adapter needs the same idempotency key, or a
   way to look up what it sent, so that reconciliation keeps working.
@@ -534,7 +535,8 @@ audit log is append-only.
   stable; after a prompt fix, clearing the `note_readings` table re-reads every note once.
 - **The message checks are heuristics.** They catch invented dates, numbers, quantities,
   deadlines, status requests, links and capitalised names; a lower-case name or an invented
-  sentence without any of those can still pass. Recipient, decision and dates never come from
+  sentence without any of those can still pass, and an unusual capitalised word can send a
+  good draft to its template. Recipient, decision and dates never come from
   the model, so the risk is limited to wording.
 - **The stub is a test double, not a model.** The keyword rules cover the fixture; the real
   model's accuracy on notes should be measured on a labelled set before production.
