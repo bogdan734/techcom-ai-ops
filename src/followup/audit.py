@@ -47,7 +47,7 @@ class JsonLinesFormatter(logging.Formatter):
 
 
 @contextmanager
-def run_logging(audit_path: Path, run_id: str, verbose: bool = False) -> Iterator[None]:
+def run_logging(audit_path: Path, run_id: str) -> Iterator[None]:
     """Console + append-only audit file for the duration of one run."""
     logger = logging.getLogger(LOGGER_NAME)
     logger.setLevel(logging.DEBUG)
@@ -55,7 +55,7 @@ def run_logging(audit_path: Path, run_id: str, verbose: bool = False) -> Iterato
     run_filter = _RunId(run_id)
 
     console = logging.StreamHandler(sys.stdout)
-    console.setLevel(logging.DEBUG if verbose else logging.INFO)
+    console.setLevel(logging.INFO)
     console.setFormatter(
         logging.Formatter("%(asctime)s | %(levelname)-7s | %(message)s", "%H:%M:%S")
     )

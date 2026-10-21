@@ -27,7 +27,8 @@ jobs:
         run: ruff format --check src tests
       - name: Test
         run: pytest
-      - name: Smoke run on the fixture, twice
+      - name: Smoke run on the fixture, twice, then once against a flaky API
         run: |
-          PYTHONPATH=src python -m followup run --out out
-          PYTHONPATH=src python -m followup run --out out
+          make demo
+          test "$(wc -l < out/delivery_log.jsonl)" -eq 7
+          test "$(wc -l < out/faults/delivery_log.jsonl)" -eq 7

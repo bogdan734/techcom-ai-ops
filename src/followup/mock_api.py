@@ -25,16 +25,20 @@ FAULTS = frozenset({"429", "500", "502", "503", "504", "timeout", "timeout-after
 MAX_PAGE = 500
 
 
+class FaultSpecError(ValueError):
+    pass
+
+
 def parse_faults(specs: Iterable[str]) -> dict[str, list[str]]:
     """``["tasks=429,503", "send=timeout-after-commit"]`` -> faults per route, in order."""
     faults: dict[str, list[str]] = {}
     for spec in specs:
         route, _, items = spec.partition("=")
         if route not in ROUTES:
-            raise ValueError(f"unknown fault route {route!r}, expected one of {sorted(ROUTES)}")
+            raise FaultSpecError(f"unknown fault route {route!r}, expected one of {sorted(ROUTES)}")
         for item in filter(None, (part.strip() for part in items.split(","))):
             if item not in FAULTS:
-                raise ValueError(f"unknown fault {item!r}, expected one of {sorted(FAULTS)}")
+                raise FaultSpecError(f"unknown fault {item!r}, expected one of {sorted(FAULTS)}")
             faults.setdefault(route, []).append(item)
     return faults
 
