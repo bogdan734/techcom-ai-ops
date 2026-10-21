@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import re
 
-from ..guard import screen_note
+from ..guard import screen_text
 from ..templates import render_message
 from .base import Completion, LLMError, LLMRequest
 
@@ -46,4 +46,4 @@ def read_note(note: str) -> dict[str, object]:
         blocker = "dependency"
     else:
         blocker = "none"
-    return {"blocker": blocker, "contains_instructions": bool(screen_note(note))}
+    return {"blocker": blocker, "contains_instructions": bool(screen_text(note))}

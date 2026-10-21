@@ -1,4 +1,4 @@
-"""SQLite state: the outbox of follow-ups and the cache of note readings.
+"""SQLite state: the outbox of follow-ups and the note readings decisions were based on.
 
 The connection runs in autocommit mode, so every state change is on disk before the side
 effect it guards. A crash at any point leaves enough behind for the next run to finish
@@ -127,7 +127,7 @@ class Store:
             (error, _now(), action_id),
         )
 
-    # -- note reading cache ------------------------------------------------
+    # -- note readings -----------------------------------------------------
 
     def get_reading(self, cache_key: str) -> dict[str, Any] | None:
         row = self.db.execute(

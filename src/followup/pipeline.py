@@ -18,6 +18,7 @@ from .audit import emit, run_logging
 from .config import ConfigError, Settings
 from .delivery import Outbox
 from .drafting import Drafter
+from .guard import INJECTION_FLAG, screen_text
 from .llm import LLMClient, LLMGateway, Usage
 from .llm.anthropic_client import AnthropicClient
 from .llm.stub import StubClient
@@ -72,8 +73,10 @@ class FollowUpService:
 
     def handle(self, task: Task, people: set[str]) -> TaskOutcome:
         assessment = assess(task, self.today)
-        reading = self.reader.read(task, needed=assessment.needs_reading)
+        note_flagged, flagged = self._screen(task)
+        reading = self.reader.read(task, needed=assessment.needs_reading, flagged=note_flagged)
         verdict = decide(assessment, reading.blocker, self.policy)
+        flags = sorted({*reading.flags, *([INJECTION_FLAG] if flagged else [])})
         outcome = TaskOutcome(
             task_id=task.task_id,
             decision=verdict.decision.value,
@@ -82,7 +85,7 @@ class FollowUpService:
             project=task.project,
             task=task.title,
             note_reading={"blocker": reading.blocker.value, "source": reading.source},
-            flags=[*reading.flags, *(f"data: {issue}" for issue in task.issues)],
+            flags=[*flags, *(f"data: {issue}" for issue in task.issues)],
         )
         emit(
             "decision",
@@ -97,6 +100,18 @@ class FollowUpService:
             flags=outcome.flags,
         )
         if verdict.decision is Decision.NO_ACTION or verdict.target is None:
+            return outcome
+        if reading.source == "unavailable":
+            # The note decides who hears about this task; without a trustworthy reading the
+            # service holds it rather than acting on a guess it might contradict next run.
+            outcome.delivery = "deferred"
+            outcome.reason += "; held until the note can be read"
+            emit(
+                "task_deferred",
+                f"{task.task_id}: held until its note can be read",
+                level=logging.WARNING,
+                task_id=task.task_id,
+            )
             return outcome
 
         outcome.action_id = action_id(task, verdict)
@@ -120,22 +135,38 @@ class FollowUpService:
             # Unfinished from an earlier run: resend the same words under the same key.
             message, drafted_by = stored.action.message, stored.action.drafted_by
         else:
-            message, drafted_by = self.drafter.draft(task, assessment, verdict, reading, people)
-        action = Action(
-            action_id=outcome.action_id,
-            task_id=task.task_id,
-            decision=verdict.decision,
-            target=verdict.target,
-            reason=verdict.reason,
-            message=message,
-            drafted_by=drafted_by,
+            message, drafted_by = self.drafter.draft(task, assessment, verdict, people, flagged)
+        delivery = self.outbox.deliver(
+            Action(
+                action_id=outcome.action_id,
+                task_id=task.task_id,
+                decision=verdict.decision,
+                target=verdict.target,
+                reason=verdict.reason,
+                message=message,
+                drafted_by=drafted_by,
+            )
         )
-        delivery = self.outbox.deliver(action)
-        outcome.message = message
-        outcome.drafted_by = drafted_by
+        outcome.message = delivery.action.message
+        outcome.drafted_by = delivery.action.drafted_by
         outcome.delivery = delivery.status
         outcome.message_id = delivery.message_id
         return outcome
+
+    def _screen(self, task: Task) -> tuple[bool, bool]:
+        """(note flagged, any free text flagged): the title and project reach the model too."""
+        note = screen_text(task.notes)
+        other = screen_text(f"{task.title}\n{task.project}")
+        if note or other:
+            emit(
+                "text_flagged",
+                f"{task.task_id}: free text looks like instructions to the system "
+                f"({', '.join(sorted({*note, *other}))}); the model will not see this task",
+                level=logging.WARNING,
+                task_id=task.task_id,
+                patterns=sorted({*note, *other}),
+            )
+        return bool(note), bool(note or other)
 
 
 def run(

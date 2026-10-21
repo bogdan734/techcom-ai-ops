@@ -1,9 +1,14 @@
 """Note reading: the model classifies what, if anything, a task note says is blocking it.
 
-The answer is one of four labels plus a flag, nothing else: the model never sees a way to
-name an owner, a date or a status, so it cannot invent one. Valid answers are cached by
-note content, which keeps re-runs free and stops model variance from flipping a decision
-(and with it the identity of an already-sent follow-up) for a note that did not change.
+The answer is one of four labels plus a flag, nothing else: no field can carry an owner, a
+date or a status, so the model cannot invent one.
+
+A reading is stored per task and note text and reused from then on, whichever model or
+prompt version is current. A task whose note has not changed keeps its decision from run to
+run, and with it the identity of a follow-up that was already sent. When no trustworthy
+reading is available (model down, budget spent, answers that keep failing validation),
+nothing is stored and the caller holds the task for the next run instead of acting on a
+guess.
 """
 
 from __future__ import annotations
@@ -16,12 +21,12 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict
 
 from .audit import emit
-from .guard import INJECTION_FLAG, screen_note
+from .guard import INJECTION_FLAG
 from .llm import LLMGateway, LLMRequest, LLMUnavailable
 from .models import Blocker, Reading, Task
 from .store import Store
 
-PROMPT_VERSION = "read-note/1"
+UNREAD_FLAG = "note_unread"
 
 SYSTEM = """\
 You classify the free-text note on a construction project task.
@@ -61,53 +66,46 @@ class NoteReader:
         self.gateway = gateway
         self.store = store
 
-    def read(self, task: Task, needed: bool) -> Reading:
-        """Every note is screened; the model is asked only when the note decides routing."""
-        patterns = screen_note(task.notes)
-        if patterns:
-            emit(
-                "note_flagged",
-                f"{task.task_id}: note looks like instructions to the system "
-                f"({', '.join(patterns)}); it will not be sent to the model",
-                level=logging.WARNING,
-                task_id=task.task_id,
-                patterns=patterns,
-            )
-            return Reading(Blocker.UNKNOWN, "flagged", (INJECTION_FLAG,))
+    def read(self, task: Task, needed: bool, flagged: bool) -> Reading:
+        """``needed``: the note decides the routing. ``flagged``: the note failed the screen."""
         if not needed:
-            return Reading(Blocker.UNKNOWN, "not_needed")
+            return Reading(Blocker.UNKNOWN, "not_needed", (INJECTION_FLAG,) if flagged else ())
         if not task.notes:
             return Reading(Blocker.NONE, "empty")
 
-        key = self._cache_key(task)
-        cached = self.store.get_reading(key)
-        if cached is not None:
-            return _reading(NoteAnswer.model_validate(cached), "cache")
+        key = reading_key(task)
+        stored = self.store.get_reading(key)
+        if stored is not None:
+            return _reading(NoteAnswer.model_validate(stored), "stored")
+        if flagged:
+            # Never sent to the model; remembered like a reading so the decision stays put.
+            answer = NoteAnswer(blocker="unclear", contains_instructions=True)
+            self.store.put_reading(key, answer.model_dump(), "screen")
+            return _reading(answer, "flagged")
         try:
             answer = self.gateway.ask(self._request(task), NoteAnswer)
         except LLMUnavailable as exc:
             emit(
-                "note_fallback",
-                f"{task.task_id}: note not read ({exc}); deciding on dates and status only",
+                "note_unread",
+                f"{task.task_id}: note not read ({exc})",
                 level=logging.WARNING,
                 task_id=task.task_id,
                 error=str(exc),
             )
-            return Reading(Blocker.UNKNOWN, "fallback", ("llm_fallback",))
+            return Reading(Blocker.UNKNOWN, "unavailable", (UNREAD_FLAG,))
         self.store.put_reading(key, answer.model_dump(), self.gateway.model)
         return _reading(answer, "model")
 
     def _request(self, task: Task) -> LLMRequest:
-        facts = {"task": task.title, "note": task.notes}
+        facts = {"note": task.notes}
         # JSON-encoding the note keeps its boundaries unambiguous whatever it contains.
-        prompt = "Classify the note of this task:\n" + json.dumps(facts, ensure_ascii=False)
+        prompt = "Classify this task note:\n" + json.dumps(facts, ensure_ascii=False)
         return LLMRequest("read_note", SYSTEM, prompt, SCHEMA, facts)
 
-    def _cache_key(self, task: Task) -> str:
-        material = json.dumps(
-            [PROMPT_VERSION, self.gateway.model, task.title, task.notes], ensure_ascii=False
-        )
-        return hashlib.sha256(material.encode("utf-8")).hexdigest()
+
+def reading_key(task: Task) -> str:
+    material = json.dumps([task.task_id, task.notes], ensure_ascii=False)
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()
 
 
 def _reading(answer: NoteAnswer, source: str) -> Reading:

@@ -169,3 +169,13 @@ def test_claim_returns_the_first_writer_wins_copy(store):
     stored = store.claim(Action(**{**action().__dict__, "message": "different wording"}))
 
     assert stored.action.message == action().message
+
+
+def test_outcome_reports_the_wording_that_actually_went_out(store):
+    backend = MockBackend([])
+    store.claim(action())  # another run claimed this action first, with its own draft
+
+    delivery = outbox(store, backend).deliver(Action(**{**action().__dict__, "message": "Other."}))
+
+    assert delivery.action.message == action().message
+    assert backend.messages["act-1"]["body"] == action().message

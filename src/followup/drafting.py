@@ -1,16 +1,16 @@
 """Message drafting: the model writes the follow-up, deterministic checks decide if it ships.
 
-The model receives only facts the rules already worked with (plus the note, unless it was
-flagged) and returns one field, the message text. Recipient, decision and reason are
-never taken from it. A draft that fails :func:`check_message` gets one repair attempt,
-then the template for the decision is sent instead.
+The model receives the facts the rules worked with, plus the note, and returns one field:
+the message text. Recipient, decision and reason never come from it. A draft that fails
+:func:`check_message` gets one repair attempt, then the template for the decision goes out.
+A task whose free text failed the injection screen skips the model and gets the template.
 """
 
 from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Set
+from collections.abc import Mapping, Set
 from datetime import date
 from typing import Any
 
@@ -19,7 +19,7 @@ from pydantic import BaseModel, ConfigDict
 from .audit import emit
 from .guard import MessageFacts, check_message
 from .llm import LLMGateway, LLMRequest, LLMUnavailable
-from .models import Decision, Reading, Status, Task, Verdict
+from .models import Decision, Status, Task, Verdict
 from .rules import Assessment
 from .templates import render_message
 
@@ -69,20 +69,18 @@ class Drafter:
         task: Task,
         assessment: Assessment,
         verdict: Verdict,
-        reading: Reading,
         people: Set[str],
+        flagged: bool,
     ) -> tuple[str, str]:
-        """The message to send and who wrote it: the model id, or ``"template"``."""
-        facts = self.facts(task, assessment, verdict, include_note=not reading.flags)
-        limits = MessageFacts(
-            task_id=task.task_id,
-            recipient=verdict.target or "",
-            recipient_kind=verdict.target_kind or "role",
-            allowed_dates=frozenset(
-                d for d in (facts["due_date"], facts["last_update"], facts["today"]) if d
-            ),
-            other_people=frozenset(people - {task.owner, verdict.target}),
-        )
+        """The message to send and who wrote it: the model id, or ``"template"``.
+
+        ``flagged`` means the task's free text failed the injection screen; such a task
+        never reaches the model and always gets the template.
+        """
+        facts = self.facts(task, assessment, verdict, include_note=not flagged)
+        if flagged:
+            return render_message(facts), "template"
+        limits = message_limits(facts, people)
         prompt = "Write the message for these facts:\n" + json.dumps(facts, ensure_ascii=False)
         request = LLMRequest("draft_message", SYSTEM, prompt, SCHEMA, facts)
         try:
@@ -123,5 +121,28 @@ class Drafter:
             "today": self.today.isoformat(),
             "days_overdue": assessment.days_overdue,
             "due_in_days": assessment.due_in_days,
+            "days_since_update": assessment.days_since_update,
             "note": task.notes if include_note else None,
         }
+
+
+def message_limits(facts: Mapping[str, Any], people: Set[str]) -> MessageFacts:
+    """What a message drafted from ``facts`` may repeat: their words, digits and dates."""
+    texts = [
+        facts[name]
+        for name in ("task_id", "task", "project", "owner", "recipient", "reason", "note")
+        if facts[name]
+    ]
+    return MessageFacts.grounded_in(
+        task_id=facts["task_id"],
+        recipient=facts["recipient"] or "",
+        recipient_kind=facts["recipient_kind"] or "role",
+        texts=[text.replace("_", " ") for text in texts],
+        dates=[facts[name] for name in ("due_date", "last_update", "today") if facts[name]],
+        numbers=[
+            facts[name]
+            for name in ("days_overdue", "due_in_days", "days_since_update")
+            if facts[name] is not None
+        ],
+        other_people=frozenset(people - {facts["owner"], facts["recipient"]}),
+    )

@@ -25,6 +25,9 @@ from .store import Store
 class Delivery:
     # sent | reconciled | duplicate_suppressed | failed | deferred
     status: str
+    # The stored action this outcome is about: when another run claimed it first, its wording
+    # is what went out, not the caller's.
+    action: Action
     message_id: str | None = None
     detail: str = ""
 
@@ -45,7 +48,9 @@ class Outbox:
     def deliver(self, action: Action) -> Delivery:
         stored = self.store.claim(action)
         if stored.status == "sent":
-            return Delivery("duplicate_suppressed", stored.message_id, "already delivered")
+            return Delivery(
+                "duplicate_suppressed", stored.action, stored.message_id, "already delivered"
+            )
         if self.breaker.open:
             emit(
                 "delivery_deferred",
@@ -54,7 +59,7 @@ class Outbox:
                 task_id=action.task_id,
                 action_id=action.action_id,
             )
-            return Delivery("deferred", detail="provider unavailable this run")
+            return Delivery("deferred", stored.action, detail="provider unavailable this run")
         try:
             if stored.attempts:
                 # An earlier run may have reached the provider before it lost track.
@@ -73,7 +78,7 @@ class Outbox:
                 action_id=action.action_id,
                 error=str(exc),
             )
-            return Delivery("failed", detail=str(exc))
+            return Delivery("failed", stored.action, detail=str(exc))
         self.breaker.record_success()
         return delivery
 
@@ -141,7 +146,7 @@ class Outbox:
             status=how,
             message_id=message_id,
         )
-        return Delivery(how, message_id)
+        return Delivery(how, action, message_id)
 
 
 def _message_id(response: httpx2.Response) -> str | None:
