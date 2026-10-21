@@ -1,0 +1,5 @@
+# Everything the tests and the linter need. The suite never touches the network:
+# the tasks API, the messaging provider and the LLM are all served in-process.
+-r requirements.txt
+pytest>=8.0
+ruff>=0.6

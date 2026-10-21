@@ -1,0 +1,7 @@
+# Runtime dependencies.
+# httpx2 is the HTTP client the Anthropic SDK is built on, so the service and the
+# SDK share one HTTP stack (timeouts, transports, exceptions).
+anthropic>=1.12,<2
+httpx2>=2.0,<3
+pydantic>=2.7,<3
+python-dotenv>=1.0
