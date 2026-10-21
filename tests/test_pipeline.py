@@ -157,6 +157,19 @@ def test_garbage_from_the_model_holds_note_dependent_tasks_and_sends_the_rest(se
     assert report.llm.rejected_answers > 0
 
 
+def test_scripted_model_faults_from_the_command_line_behave_like_a_bad_model(settings):
+    report = go(settings, faults={"llm": ["garbage"] * 50})
+
+    assert {o.task_id for o in report.outcomes if o.delivery == "deferred"} == {
+        "TC-1001",
+        "TC-1002",
+        "TC-1008",
+        "TC-1009",
+    }
+    assert go(settings).exit_code == 0
+    assert len(delivered(settings)) == 7
+
+
 def test_model_outage_then_recovery_still_sends_each_follow_up_once(settings):
     go(settings, llm=ScriptedLLM(default=LLMError("HTTP 529 after SDK retries")))
 

@@ -1,9 +1,9 @@
 """In-process stand-ins for the tasks API and the messaging provider.
 
 They are served through ``httpx2.MockTransport``, so the service's HTTP code (status codes,
-headers, timeouts, retries) runs exactly as it would against a remote API. Faults are
-scripted per route to reproduce rate limiting, outages and a write that is committed
-while its response is lost.
+headers, timeouts, retries) runs exactly as it would against a remote API. Faults (see
+:mod:`followup.faults`) are scripted per route to reproduce rate limiting, outages and a
+write that is committed while its response is lost.
 
 The messaging provider honours ``Idempotency-Key`` and persists what it "sent" to an
 append-only JSONL file: that file is the mock delivery log.
@@ -20,27 +20,7 @@ from typing import Any
 
 import httpx2
 
-ROUTES = {"tasks": "GET /tasks", "send": "POST /messages", "lookup": "GET /messages"}
-FAULTS = frozenset({"429", "500", "502", "503", "504", "timeout", "timeout-after-commit"})
 MAX_PAGE = 500
-
-
-class FaultSpecError(ValueError):
-    pass
-
-
-def parse_faults(specs: Iterable[str]) -> dict[str, list[str]]:
-    """``["tasks=429,503", "send=timeout-after-commit"]`` -> faults per route, in order."""
-    faults: dict[str, list[str]] = {}
-    for spec in specs:
-        route, _, items = spec.partition("=")
-        if route not in ROUTES:
-            raise FaultSpecError(f"unknown fault route {route!r}, expected one of {sorted(ROUTES)}")
-        for item in filter(None, (part.strip() for part in items.split(","))):
-            if item not in FAULTS:
-                raise FaultSpecError(f"unknown fault {item!r}, expected one of {sorted(FAULTS)}")
-            faults.setdefault(route, []).append(item)
-    return faults
 
 
 class MockBackend:

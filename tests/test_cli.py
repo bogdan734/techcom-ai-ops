@@ -29,7 +29,7 @@ def test_unknown_fault_is_a_configuration_error(tmp_path, capsys):
     code = main(["run", "--today", "2026-10-21", "--out", str(tmp_path), "--fault", "tasks=418"])
 
     assert code == 1
-    assert "unknown fault '418'" in capsys.readouterr().err
+    assert "unknown fault '418' for tasks" in capsys.readouterr().err
 
 
 def test_real_provider_requires_a_key(tmp_path, monkeypatch, capsys):

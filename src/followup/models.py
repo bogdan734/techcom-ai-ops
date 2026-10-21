@@ -114,18 +114,18 @@ def action_id(task: Task, verdict: Verdict) -> str:
 
 @dataclass
 class TaskOutcome:
-    """One line of ``decisions.json``."""
+    """One record of ``decisions.json``: the decision first, then how it was carried out."""
 
     task_id: str
-    project: str
-    task: str
     decision: str
     target: str | None
     reason: str
     message: str | None = None
-    action_id: str | None = None
+    project: str = ""
+    task: str = ""
     delivery: str = "none"
     message_id: str | None = None
+    action_id: str | None = None
     drafted_by: str | None = None
     note_reading: dict[str, str] = field(default_factory=dict)
     flags: list[str] = field(default_factory=list)

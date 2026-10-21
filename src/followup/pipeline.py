@@ -18,6 +18,7 @@ from .audit import emit, run_logging
 from .config import ConfigError, Settings
 from .delivery import Outbox
 from .drafting import Drafter
+from .faults import FaultyLLM
 from .guard import INJECTION_FLAG, screen_text
 from .llm import LLMClient, LLMGateway, Usage
 from .llm.anthropic_client import AnthropicClient
@@ -87,31 +88,30 @@ class FollowUpService:
             note_reading={"blocker": reading.blocker.value, "source": reading.source},
             flags=[*flags, *(f"data: {issue}" for issue in task.issues)],
         )
+        actionable = verdict.decision is not Decision.NO_ACTION and verdict.target is not None
+        # The note decides who hears about this task; without a trustworthy reading the
+        # service holds it rather than acting on a guess it might contradict next run.
+        held = actionable and reading.source == "unavailable"
+        summary = f"{verdict.decision.value}" + (f" -> {verdict.target}" if verdict.target else "")
         emit(
             "decision",
-            f"{task.task_id}: {verdict.decision.value}"
-            + (f" -> {verdict.target}" if verdict.target else "")
-            + f" ({verdict.reason})",
+            f"{task.task_id}: held until its note can be read (on dates alone: {summary})"
+            if held
+            else f"{task.task_id}: {summary} ({verdict.reason})",
+            level=logging.WARNING if held else logging.INFO,
             task_id=task.task_id,
             decision=verdict.decision.value,
             target=verdict.target,
             reason=verdict.reason,
+            held=held,
             note_reading=outcome.note_reading,
             flags=outcome.flags,
         )
-        if verdict.decision is Decision.NO_ACTION or verdict.target is None:
+        if not actionable:
             return outcome
-        if reading.source == "unavailable":
-            # The note decides who hears about this task; without a trustworthy reading the
-            # service holds it rather than acting on a guess it might contradict next run.
+        if held:
             outcome.delivery = "deferred"
             outcome.reason += "; held until the note can be read"
-            emit(
-                "task_deferred",
-                f"{task.task_id}: held until its note can be read",
-                level=logging.WARNING,
-                task_id=task.task_id,
-            )
             return outcome
 
         outcome.action_id = action_id(task, verdict)
@@ -180,6 +180,8 @@ def run(
     ``llm`` and ``retry`` default to what the settings describe; tests pass their own.
     """
     llm = llm or make_llm(settings)
+    if faults and faults.get("llm"):
+        llm = FaultyLLM(llm, faults["llm"])
     policy = retry or RetryPolicy()
     report = RunReport(uuid.uuid4().hex[:12], settings.today, llm.model)
     out = settings.out_dir

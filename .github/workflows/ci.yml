@@ -27,8 +27,10 @@ jobs:
         run: ruff format --check src tests
       - name: Test
         run: pytest
-      - name: Smoke run on the fixture, twice, then once against a flaky API
+      - name: Demo walkthrough, then check nothing was sent twice
         run: |
           make demo
-          test "$(wc -l < out/delivery_log.jsonl)" -eq 7
-          test "$(wc -l < out/faults/delivery_log.jsonl)" -eq 7
+          for log in out/delivery_log.jsonl out/flaky/delivery_log.jsonl out/model/delivery_log.jsonl; do
+            test "$(wc -l < "$log")" -eq 7
+            test "$(cut -d'"' -f8 "$log" | sort -u | wc -l)" -eq 7
+          done

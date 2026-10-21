@@ -10,7 +10,7 @@ from collections.abc import Sequence
 from dotenv import load_dotenv
 
 from .config import PROVIDERS, ConfigError, Settings
-from .mock_api import FAULTS, ROUTES, FaultSpecError, parse_faults
+from .faults import ROUTES, FaultSpecError, parse_faults
 from .pipeline import run
 
 
@@ -36,9 +36,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--fault",
         action="append",
         default=[],
-        metavar="ROUTE=F1,F2",
-        help=f"inject mock API faults; routes {', '.join(ROUTES)}; "
-        f"faults {', '.join(sorted(FAULTS))}",
+        metavar="ROUTE=F1,F2xN",
+        help="inject failures, e.g. tasks=429,503 send=timeout-after-commit llm=garbagex10; "
+        + "; ".join(f"{route}: {', '.join(sorted(faults))}" for route, faults in ROUTES.items()),
     )
     return parser
 

@@ -8,7 +8,8 @@ import pytest
 
 from conftest import Sleeps, no_wait_policy
 from followup.api import ApiError, MessagesApi, TasksApi, request_with_retries
-from followup.mock_api import MockBackend, parse_faults
+from followup.faults import FaultSpecError, parse_faults
+from followup.mock_api import MockBackend
 from followup.retry import RetryPolicy, parse_retry_after
 
 
@@ -144,14 +145,18 @@ def test_timeout_after_commit_stores_the_message_but_loses_the_response():
 
 
 def test_fault_specs_are_validated():
-    assert parse_faults(["tasks=429, 503", "send=timeout-after-commit"]) == {
+    assert parse_faults(["tasks=429, 503", "send=timeout-after-commit", "llm=garbagex2"]) == {
         "tasks": ["429", "503"],
         "send": ["timeout-after-commit"],
+        "llm": ["garbage", "garbage"],
     }
-    with pytest.raises(ValueError, match="unknown fault route"):
+    assert parse_faults(["send=503x3"]) == {"send": ["503", "503", "503"]}
+    with pytest.raises(FaultSpecError, match="unknown fault route"):
         parse_faults(["inbox=429"])
-    with pytest.raises(ValueError, match="unknown fault"):
+    with pytest.raises(FaultSpecError, match="unknown fault '418'"):
         parse_faults(["tasks=418"])
+    with pytest.raises(FaultSpecError, match="unknown fault 'garbage' for send"):
+        parse_faults(["send=garbage"])
 
 
 def test_delivery_log_lines_are_json(tmp_path):
