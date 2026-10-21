@@ -1,4 +1,4 @@
-"""Bounded retries: exponential backoff with jitter, and respect for ``Retry-After``."""
+"""Bounded retries (exponential backoff, jitter, ``Retry-After``) and circuit breaking."""
 
 from __future__ import annotations
 
@@ -47,3 +47,25 @@ def parse_retry_after(value: str | None, now: datetime | None = None) -> float |
     if moment.tzinfo is None:
         moment = moment.replace(tzinfo=UTC)
     return max(0.0, (moment - (now or datetime.now(UTC))).total_seconds())
+
+
+class CircuitBreaker:
+    """Stops calling a dependency for the rest of a run after repeated failures.
+
+    Bounded retries protect one request; the breaker protects the run. Without it an
+    outage would cost every remaining task its full retry budget against a dead service.
+    The next run starts closed, so recovery needs no extra state.
+    """
+
+    def __init__(self, threshold: int = 3):
+        self.threshold = threshold
+        self.consecutive_failures = 0
+        self.open = False
+
+    def record_success(self) -> None:
+        self.consecutive_failures = 0
+
+    def record_failure(self, fatal: bool = False) -> None:
+        self.consecutive_failures += 1
+        if fatal or self.consecutive_failures >= self.threshold:
+            self.open = True

@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from datetime import date
 
 from .models import Blocker, Decision, Status, Task, Verdict
+from .wording import days, listing
 
 
 @dataclass(frozen=True)
@@ -69,7 +70,7 @@ def decide(assessment: Assessment, blocker: Blocker, policy: Policy) -> Verdict:
     if assessment.missing:
         return Verdict(
             Decision.CLARIFY,
-            "Missing " + _listing(assessment.missing),
+            "Missing " + listing(assessment.missing),
             policy.clarify_target,
             "role",
         )
@@ -94,27 +95,27 @@ def decide(assessment: Assessment, blocker: Blocker, policy: Policy) -> Verdict:
         if overdue >= policy.escalate_after_days:
             return Verdict(
                 Decision.ESCALATE,
-                f"Overdue by {_days(overdue)}, escalation threshold is "
-                f"{_days(policy.escalate_after_days)}",
+                f"Overdue by {days(overdue)}, escalation threshold is "
+                f"{days(policy.escalate_after_days)}",
                 policy.escalation_target,
                 "role",
             )
         if task.status is Status.BLOCKED:
             return _to_owner(task, _join("Blocked, blocker not stated", timing))
-        return _to_owner(task, f"Overdue by {_days(overdue)}{_NOTE_SUFFIX[blocker]}")
+        return _to_owner(task, f"Overdue by {days(overdue)}{_NOTE_SUFFIX[blocker]}")
 
     stale = assessment.days_since_update
     if task.status is Status.IN_PROGRESS and stale is not None and stale >= policy.stale_after_days:
-        return _to_owner(task, f"No update for {_days(stale)}")
+        return _to_owner(task, f"No update for {days(stale)}")
 
     due_in = assessment.due_in_days
     if task.status is Status.NOT_STARTED and due_in is not None and due_in <= policy.due_soon_days:
-        when = "today" if due_in == 0 else f"in {_days(due_in)}"
+        when = "today" if due_in == 0 else f"in {days(due_in)}"
         return _to_owner(task, f"Due {when} and not started")
 
     # Complete data guarantees a due date here, and overdue work returned above.
     return Verdict(
-        Decision.NO_ACTION, "On track, due " + ("today" if due_in == 0 else f"in {_days(due_in)}")
+        Decision.NO_ACTION, "On track, due " + ("today" if due_in == 0 else f"in {days(due_in)}")
     )
 
 
@@ -133,7 +134,7 @@ def _to_owner(task: Task, reason: str) -> Verdict:
 
 def _timing(assessment: Assessment) -> str | None:
     if assessment.days_overdue:
-        return f"overdue by {_days(assessment.days_overdue)}"
+        return f"overdue by {days(assessment.days_overdue)}"
     if assessment.due_in_days == 0:
         return "due today"
     return None
@@ -141,11 +142,3 @@ def _timing(assessment: Assessment) -> str | None:
 
 def _join(head: str, tail: str | None) -> str:
     return f"{head}, {tail}" if tail else head
-
-
-def _listing(items: tuple[str, ...]) -> str:
-    return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " and " + items[-1]
-
-
-def _days(count: int) -> str:
-    return f"{count} day" if count == 1 else f"{count} days"

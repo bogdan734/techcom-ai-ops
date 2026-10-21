@@ -6,18 +6,14 @@ from datetime import UTC, datetime
 import httpx2
 import pytest
 
+from conftest import Sleeps, no_wait_policy
 from followup.api import ApiError, MessagesApi, TasksApi, request_with_retries
 from followup.mock_api import MockBackend, parse_faults
 from followup.retry import RetryPolicy, parse_retry_after
 
 
-class Sleeps(list):
-    def __call__(self, seconds: float) -> None:
-        self.append(seconds)
-
-
 def policy(sleeps: Sleeps, **overrides) -> RetryPolicy:
-    return RetryPolicy(sleep=sleeps, jitter=lambda: 0.0, **overrides)
+    return no_wait_policy(sleeps, **overrides)
 
 
 def test_backoff_grows_exponentially_and_is_capped():
