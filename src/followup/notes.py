@@ -80,8 +80,8 @@ class NoteReader:
         if flagged:
             # Never sent to the model; remembered like a reading so the decision stays put.
             answer = NoteAnswer(blocker="unclear", contains_instructions=True)
-            self.store.put_reading(key, answer.model_dump(), "screen")
-            return _reading(answer, "flagged")
+            kept = self.store.keep_reading(key, answer.model_dump(), "screen")
+            return _reading(NoteAnswer.model_validate(kept), "flagged")
         try:
             answer = self.gateway.ask(self._request(task), NoteAnswer)
         except LLMUnavailable as exc:
@@ -93,8 +93,8 @@ class NoteReader:
                 error=str(exc),
             )
             return Reading(Blocker.UNKNOWN, "unavailable", (UNREAD_FLAG,))
-        self.store.put_reading(key, answer.model_dump(), self.gateway.model)
-        return _reading(answer, "model")
+        kept = self.store.keep_reading(key, answer.model_dump(), self.gateway.model)
+        return _reading(NoteAnswer.model_validate(kept), "model")
 
     def _request(self, task: Task) -> LLMRequest:
         facts = {"note": task.notes}

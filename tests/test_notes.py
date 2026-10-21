@@ -125,3 +125,19 @@ def test_answers_that_keep_failing_validation_are_not_stored(store):
     assert reader(store, llm).read(blocked(), needed=True, flagged=False).blocker is (
         Blocker.MATERIALS
     )
+
+
+def test_overlapping_runs_settle_on_the_first_stored_reading(store, tmp_path):
+    other_run = Store(tmp_path / "state.db")
+
+    class SlowModel(ScriptedLLM):
+        def complete(self, request):
+            # While this run waits for its answer, another run reads the note and stores
+            # a different interpretation first.
+            reader(other_run, ScriptedLLM(DEPENDENCY)).read(blocked(), needed=True, flagged=False)
+            return super().complete(request)
+
+    reading = reader(store, SlowModel(MATERIALS)).read(blocked(), needed=True, flagged=False)
+
+    assert reading.blocker is Blocker.DEPENDENCY
+    other_run.close()

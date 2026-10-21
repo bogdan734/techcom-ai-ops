@@ -38,10 +38,7 @@ def render_message(facts: Mapping[str, Any]) -> str:
 
 def _owner_situation(facts: Mapping[str, Any]) -> str:
     if facts["status"] == "Blocked":
-        return (
-            "is marked Blocked. Please reply with what is blocking it "
-            "and who can clear the blocker."
-        )
+        return "is blocked. Please reply with what is blocking it and who can clear the blocker."
     if facts["days_overdue"]:
         return (
             f"was due on {facts['due_date']} and is {days(facts['days_overdue'])} overdue. "

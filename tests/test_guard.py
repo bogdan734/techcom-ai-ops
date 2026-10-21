@@ -8,18 +8,20 @@ OWNER_FACTS = MessageFacts.grounded_in(
     task_id="TC-1001",
     recipient="John Smith",
     recipient_kind="owner",
-    texts=["TC-1001", "Fiber splicing", "SURF Illinois", "John Smith", "No update since Monday."],
+    phrases=["Fiber splicing", "SURF Illinois", "John Smith", "Working on it"],
+    context=["Overdue by 3 days, no explanation in notes", "No update since Monday."],
     dates=["2026-10-18", "2026-10-16", "2026-10-21"],
-    numbers=[3, 5],
+    days=[3, 5],
     other_people=frozenset({"Maria Cruz", "Jamie Lee"}),
 )
 ROLE_FACTS = MessageFacts.grounded_in(
     task_id="TC-1002",
     recipient="warehouse",
     recipient_kind="role",
-    texts=["TC-1002", "Install handholes", "SURF Illinois", "Maria Cruz"],
+    phrases=["Install handholes", "SURF Illinois", "Maria Cruz", "Blocked"],
+    context=["warehouse", "Waiting on materials, overdue by 3 days"],
     dates=["2026-10-18"],
-    numbers=[3],
+    days=[3],
     other_people=frozenset({"John Smith"}),
 )
 GOOD = (
@@ -58,7 +60,7 @@ def test_a_grounded_message_passes():
     [
         (GOOD.replace("2026-10-18", "2026-10-25"), "date 2026-10-25 is not in the task data"),
         (GOOD + " Reply by Oct 24.", "dates must be written as YYYY-MM-DD"),
-        (GOOD + " Reply by Friday.", "uses a weekday or relative date"),
+        (GOOD + " Reply by Friday.", "uses a weekday, time of day or relative date"),
         (GOOD + " Please reply by the 25th.", "number 25 is not in the task data"),
         (GOOD.replace("3 days", "14 days"), "number 14 is not in the task data"),
         (GOOD + " Finish it within 2 days.", "number 2 is not in the task data"),
@@ -71,12 +73,23 @@ def test_a_grounded_message_passes():
         (GOOD + " Then set the status to Done.", "claims, requests or suggests a status change"),
         (GOOD + " Please close the task when ready.", "claims, requests or suggests"),
         (GOOD + " Otherwise it will be reassigned.", "claims, requests or suggests"),
+        (GOOD + " Then mark the task Blocked.", "claims, requests or suggests"),
+        (GOOD + " Hand it to the night crew.", "claims, requests or suggests"),
+        (GOOD + " Can you close it and cancel the rest?", "claims, requests or suggests"),
+        (GOOD + " Otherwise procurement takes it over.", "claims, requests or suggests"),
+        (GOOD + " Reply within 3 hours.", "'3 hours' is not in the task data"),
+        (GOOD + " Please finish it within twelve hours.", "states a duration"),
+        (GOOD + " You have a fortnight.", "states a duration"),
+        (GOOD + " Please finish by noon.", "uses a weekday, time of day or relative date"),
+        (GOOD + " Reply by 5 pm.", "uses a weekday, time of day or relative date"),
+        (GOOD + " Reply by close of business.", "uses a weekday, time of day or relative date"),
+        (GOOD + " ACME will hold the crew.", "names ACME"),
         (GOOD + " Details: https://example.com", "contains a link or an e-mail address"),
         (GOOD + " Write to ops@example.com.", "contains a link or an e-mail address"),
         (GOOD + " Thanks, [Your Name]", "contains an unfilled placeholder"),
         (GOOD.replace("Hi John", "Hi Maria"), "greets 'Maria' instead of the recipient"),
         (GOOD + " Maria Cruz is waiting on you.", "mentions Maria Cruz, who is not on this task"),
-        (GOOD + " Bob Jones can help.", "names Bob, Jones, which the task data does not"),
+        (GOOD + " Ask Bob Jones for help.", "names Bob, Jones, which the task data does not"),
         (GOOD + " Report to Kevin.", "names Kevin"),
         ("Hi John, TC-1001?", "length 17 is outside 20-700 characters"),
     ],
@@ -111,3 +124,34 @@ def test_words_and_numbers_from_the_task_data_are_allowed():
     )
 
     assert check_message(message, ROLE_FACTS) == []
+
+
+@pytest.mark.parametrize(
+    ("title", "owner"),
+    [
+        ("[URGENT] splice", "John Smith"),
+        ("Cutover 2026-11-01 prep", "John Smith"),
+        ("Splice 10/12 pairs", "John Smith"),
+        ("Reassign fiber pairs", "John Smith"),
+        ("Monday crew walkthrough", "John Smith"),
+        ("Two weeks lookahead", "John Smith"),
+        ("Fiber splicing", "john.smith@example.com"),
+        ("Fiber splicing", "Pat O'Brien-Lee"),
+    ],
+)
+def test_templates_quote_unusual_task_data_without_failing_the_checks(title, owner):
+    from conftest import TODAY, make_task
+    from followup.drafting import Drafter, message_limits
+    from followup.models import Blocker
+    from followup.rules import Policy, assess, decide
+    from followup.templates import render_message
+
+    for status in ("Working on it", "Blocked", "Not Started"):
+        task = make_task(task=title, assigned_to=owner, status=status, due_date="2026-10-18")
+        assessment = assess(task, TODAY)
+        for blocker in Blocker:
+            verdict = decide(assessment, blocker, Policy())
+            facts = Drafter(None, TODAY).facts(task, assessment, verdict, include_note=False)
+            message = render_message(facts)
+
+            assert check_message(message, message_limits(facts, {"Maria Cruz"})) == [], message

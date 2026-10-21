@@ -127,19 +127,19 @@ class Drafter:
 
 
 def message_limits(facts: Mapping[str, Any], people: Set[str]) -> MessageFacts:
-    """What a message drafted from ``facts`` may repeat: their words, digits and dates."""
-    texts = [
-        facts[name]
-        for name in ("task_id", "task", "project", "owner", "recipient", "reason", "note")
-        if facts[name]
-    ]
+    """What a message drafted from ``facts`` may repeat: their words, numbers and dates."""
     return MessageFacts.grounded_in(
         task_id=facts["task_id"],
         recipient=facts["recipient"] or "",
         recipient_kind=facts["recipient_kind"] or "role",
-        texts=[text.replace("_", " ") for text in texts],
+        phrases=[facts[name] for name in ("task", "project", "owner", "status_raw") if facts[name]],
+        context=[
+            text.replace("_", " ")
+            for text in (facts["recipient"], facts["reason"], facts["note"])
+            if text
+        ],
         dates=[facts[name] for name in ("due_date", "last_update", "today") if facts[name]],
-        numbers=[
+        days=[
             facts[name]
             for name in ("days_overdue", "due_in_days", "days_since_update")
             if facts[name] is not None

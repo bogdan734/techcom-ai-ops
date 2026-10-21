@@ -135,12 +135,21 @@ class Store:
         ).fetchone()
         return json.loads(row[0]) if row else None
 
-    def put_reading(self, cache_key: str, answer: dict[str, Any], model: str) -> None:
+    def keep_reading(self, cache_key: str, answer: dict[str, Any], model: str) -> dict[str, Any]:
+        """Store a reading unless one exists, and return the one that is kept.
+
+        First writer wins: two overlapping runs that read the same note end up deciding on
+        the same answer, so they build the same action and the provider deduplicates it.
+        """
         self.db.execute(
-            "INSERT OR REPLACE INTO note_readings (cache_key, answer, model, created_at) "
+            "INSERT OR IGNORE INTO note_readings (cache_key, answer, model, created_at) "
             "VALUES (?, ?, ?, ?)",
             (cache_key, json.dumps(answer, sort_keys=True), model, _now()),
         )
+        kept = self.get_reading(cache_key)
+        if kept is None:
+            raise RuntimeError(f"reading {cache_key} vanished right after it was stored")
+        return kept
 
 
 def _stored(row: tuple[Any, ...]) -> StoredAction:
