@@ -29,7 +29,7 @@ from .normalize import normalise_all
 from .notes import NoteReader
 from .retry import CircuitBreaker, RetryPolicy
 from .rules import Policy, assess, decide
-from .store import Store
+from .store import PARKED_STATUSES, Store
 
 
 @dataclass
@@ -47,7 +47,7 @@ class RunReport:
         """0 all done, 1 run aborted, 2 finished but some follow-ups still owe delivery."""
         if self.aborted:
             return 1
-        unsettled = {"failed", "deferred"}
+        unsettled = {"failed", "deferred", "dead"}
         return 2 if any(o.delivery in unsettled for o in self.outcomes) else 0
 
 
@@ -135,6 +135,13 @@ class FollowUpService:
             outcome.drafted_by = stored.action.drafted_by
             outcome.delivery = "duplicate_suppressed"
             outcome.message_id = stored.message_id
+            return outcome
+
+        if stored is not None and stored.status in PARKED_STATUSES:
+            # Waiting for a person: reported as it is, so a dry run does not predict a send.
+            outcome.message = stored.action.message
+            outcome.drafted_by = stored.action.drafted_by
+            outcome.delivery = stored.status
             return outcome
 
         if stored is not None:
@@ -245,7 +252,13 @@ def run(
                 outbox = (
                     None
                     if dry_run
-                    else Outbox(store, MessagesApi(http, policy), policy, CircuitBreaker())
+                    else Outbox(
+                        store,
+                        MessagesApi(http, policy),
+                        policy,
+                        CircuitBreaker(),
+                        settings.max_failed_runs,
+                    )
                 )
                 service = FollowUpService(
                     settings.today,
@@ -294,6 +307,16 @@ def summarise(report: RunReport, settings: Settings, seconds: float) -> None:
         usage.input_tokens * settings.price_input_per_mtok
         + usage.output_tokens * settings.price_output_per_mtok
     ) / 1_000_000
+    dead = [o for o in report.outcomes if o.delivery == "dead"]
+    if dead:
+        emit(
+            "needs_attention",
+            f"{len(dead)} follow-up(s) parked as dead letters and not retried; "
+            "list them with `followup list dead`",
+            level=logging.WARNING,
+            status="dead",
+            actions=[{"task_id": o.task_id, "action_id": o.action_id} for o in dead],
+        )
     emit(
         "run_finished",
         f"run {report.run_id} finished in {seconds:.2f}s: {len(report.outcomes)} tasks | "

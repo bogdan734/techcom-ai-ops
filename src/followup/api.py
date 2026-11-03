@@ -17,6 +17,14 @@ class ApiError(Exception):
     """The API refused the request, or stayed unavailable after bounded retries."""
 
 
+class Rejected(ApiError):
+    """The provider refused the message itself, so sending it again cannot succeed."""
+
+    def __init__(self, message: str, status: int):
+        super().__init__(message)
+        self.status = status
+
+
 def request_with_retries(
     http: httpx2.Client, policy: RetryPolicy, method: str, url: str, **kwargs: Any
 ) -> httpx2.Response:

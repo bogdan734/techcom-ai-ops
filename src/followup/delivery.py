@@ -5,6 +5,8 @@
 3. A timeout or a dropped connection leaves the outcome unknown: the provider is asked
    whether it holds a message under that key (reconciliation) before anything is resent.
 4. An action left ``pending`` or ``failed`` by an earlier run is reconciled first, too.
+5. With ``max_failed_runs`` set, an action the provider refuses for good, or that failed in that
+   many runs, is parked as ``dead``: it is neither looked up nor posted again.
 """
 
 from __future__ import annotations
@@ -14,16 +16,16 @@ from dataclasses import dataclass
 
 import httpx2
 
-from .api import RETRYABLE_STATUS, ApiError, MessagesApi
+from .api import RETRYABLE_STATUS, ApiError, MessagesApi, Rejected
 from .audit import emit
 from .models import Action
 from .retry import CircuitBreaker, RetryPolicy, parse_retry_after
-from .store import Store
+from .store import PARKED_STATUSES, Store
 
 
 @dataclass(frozen=True)
 class Delivery:
-    # sent | reconciled | duplicate_suppressed | failed | deferred
+    # sent | reconciled | duplicate_suppressed | failed | deferred | dead
     status: str
     # The stored action this outcome is about: when another run claimed it first, its wording
     # is what went out, not the caller's.
@@ -39,11 +41,13 @@ class Outbox:
         messages: MessagesApi,
         policy: RetryPolicy,
         breaker: CircuitBreaker | None = None,
+        max_failed_runs: int = 0,
     ):
         self.store = store
         self.messages = messages
         self.policy = policy
         self.breaker = breaker or CircuitBreaker()
+        self.max_failed_runs = max_failed_runs
 
     def deliver(self, action: Action) -> Delivery:
         stored = self.store.claim(action)
@@ -51,6 +55,9 @@ class Outbox:
             return Delivery(
                 "duplicate_suppressed", stored.action, stored.message_id, "already delivered"
             )
+        if stored.status in PARKED_STATUSES:
+            # Settled until a person decides: not even a lookup goes out.
+            return Delivery(stored.status, stored.action)
         if self.breaker.open:
             emit(
                 "delivery_deferred",
@@ -68,8 +75,21 @@ class Outbox:
                     return self._delivered(stored.action, found.get("message_id"), "reconciled")
             delivery = self._send(stored.action)
         except ApiError as exc:
-            self.store.mark_failed(action.action_id, str(exc))
+            failures = self.store.mark_failed(action.action_id, str(exc))
             self.breaker.record_failure()
+            rejected = isinstance(exc, Rejected)
+            if self.max_failed_runs and (rejected or failures >= self.max_failed_runs):
+                self.store.mark_dead(action.action_id, str(exc))
+                emit(
+                    "dead_letter",
+                    f"{action.task_id}: parked as a dead letter, not sent again ({exc})",
+                    level=logging.ERROR,
+                    task_id=action.task_id,
+                    action_id=action.action_id,
+                    failures=failures,
+                    error=str(exc),
+                )
+                return Delivery("dead", stored.action, detail=str(exc))
             emit(
                 "delivery_failed",
                 f"{action.task_id}: not delivered ({exc}); will retry next run",
@@ -114,7 +134,12 @@ class Outbox:
                     return self._delivered(action, _message_id(response), "sent")
                 if response.status_code not in RETRYABLE_STATUS:
                     detail = response.text[:200]
-                    raise ApiError(f"POST /messages: HTTP {response.status_code} {detail}")
+                    error = f"POST /messages: HTTP {response.status_code} {detail}"
+                    # A 4xx says the message itself is wrong, so every resend would be refused too;
+                    # 408 only says the server stopped waiting, which a retry next run can fix.
+                    if 400 <= response.status_code < 500 and response.status_code != 408:
+                        raise Rejected(error, response.status_code)
+                    raise ApiError(error)
                 failure = f"HTTP {response.status_code}"
                 retry_after = parse_retry_after(response.headers.get("Retry-After"))
             delay = self.policy.delay(attempt, retry_after)

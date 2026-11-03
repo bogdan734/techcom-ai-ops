@@ -179,3 +179,56 @@ def test_outcome_reports_the_wording_that_actually_went_out(store):
 
     assert delivery.action.message == action().message
     assert backend.messages["act-1"]["body"] == action().message
+
+
+def parking_outbox(store: Store, backend: MockBackend, max_failed_runs: int) -> Outbox:
+    policy = no_wait_policy()
+    return Outbox(
+        store,
+        MessagesApi(backend.client(), policy),
+        policy,
+        CircuitBreaker(),
+        max_failed_runs=max_failed_runs,
+    )
+
+
+def test_permanent_rejection_is_parked_as_dead_when_enabled(store):
+    backend = MockBackend([], faults={"send": ["400"]})
+
+    delivery = parking_outbox(store, backend, 3).deliver(action())
+
+    assert delivery.status == "dead"
+    assert "HTTP 400" in delivery.detail
+    assert len(posts(backend)) == 1
+    stored = store.get_action("act-1")
+    assert (stored.status, stored.failures) == ("dead", 1)
+
+
+def test_action_failing_in_too_many_runs_is_parked(store):
+    backend = MockBackend([], faults={"send": ["503"] * 8})
+
+    runs = [parking_outbox(store, backend, 2).deliver(action()) for _ in range(2)]
+
+    assert [run.status for run in runs] == ["failed", "dead"]
+    assert len(posts(backend)) == 8
+    assert store.get_action("act-1").failures == 2
+
+
+def test_408_is_a_failed_run_not_a_rejection(store):
+    backend = MockBackend([], faults={"send": ["408"]})
+
+    delivery = parking_outbox(store, backend, 3).deliver(action())
+
+    assert delivery.status == "failed"
+    assert store.get_action("act-1").failures == 1
+
+
+def test_dead_action_is_never_posted_or_looked_up_again(store):
+    backend = MockBackend([], faults={"send": ["400"]})
+    parking_outbox(store, backend, 3).deliver(action())
+    calls = list(backend.calls)
+
+    again = parking_outbox(store, backend, 3).deliver(action())
+
+    assert again.status == "dead"
+    assert backend.calls == calls

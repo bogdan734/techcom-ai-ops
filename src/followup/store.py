@@ -17,6 +17,15 @@ from typing import Any
 
 from .models import Action, Decision
 
+# Kept in PRAGMA user_version and raised whenever SCHEMA changes. The submitted version never set
+# it, so its databases read as 0.
+SCHEMA_VERSION = 1
+
+# Statuses of actions that are never posted: they wait for a person.
+PARKED_STATUSES: frozenset[str] = frozenset({"dead"})
+
+# attempts counts requests, which vary with retries and reconciliation; failures counts the runs
+# that ended without delivering, which is what the dead-letter limit is about.
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS actions (
     action_id   TEXT PRIMARY KEY,
@@ -26,8 +35,9 @@ CREATE TABLE IF NOT EXISTS actions (
     reason      TEXT NOT NULL,
     message     TEXT NOT NULL,
     drafted_by  TEXT NOT NULL,
-    status      TEXT NOT NULL CHECK (status IN ('pending', 'sent', 'failed')),
+    status      TEXT NOT NULL CHECK (status IN ('pending', 'sent', 'failed', 'dead')),
     attempts    INTEGER NOT NULL DEFAULT 0,
+    failures    INTEGER NOT NULL DEFAULT 0,
     message_id  TEXT,
     last_error  TEXT,
     created_at  TEXT NOT NULL,
@@ -45,8 +55,26 @@ CREATE TABLE IF NOT EXISTS note_readings (
 
 _ACTION_COLUMNS = (
     "action_id, task_id, decision, target, reason, message, drafted_by, "
-    "status, attempts, message_id, last_error"
+    "status, attempts, failures, message_id, last_error"
 )
+
+# What a rebuild carries over: the columns the submitted version (schema 0) already had.
+_SUBMITTED_COLUMNS = (
+    "action_id, task_id, decision, target, reason, message, drafted_by, status, attempts, "
+    "message_id, last_error, created_at, updated_at"
+)
+
+# SQLite cannot alter a CHECK in place, so a table from the submitted version is rebuilt. Its
+# index goes first: a rename carries the index along, and CREATE INDEX IF NOT EXISTS would then
+# leave the new table without one.
+_RENAME_OLD_TABLE = """
+DROP INDEX IF EXISTS actions_task;
+ALTER TABLE actions RENAME TO actions_old;
+"""
+_COPY_OLD_ROWS = f"""
+INSERT INTO actions ({_SUBMITTED_COLUMNS}) SELECT {_SUBMITTED_COLUMNS} FROM actions_old;
+DROP TABLE actions_old;
+"""
 
 
 @dataclass(frozen=True)
@@ -54,6 +82,7 @@ class StoredAction:
     action: Action
     status: str
     attempts: int
+    failures: int
     message_id: str | None
     last_error: str | None
 
@@ -137,11 +166,27 @@ class Store:
             (message_id, _now(), action_id),
         )
 
-    def mark_failed(self, action_id: str, error: str) -> None:
-        """Never downgrades a sent action, which a concurrent run may have delivered."""
+    def mark_failed(self, action_id: str, error: str) -> int:
+        """Count one more run in which delivery failed and return how many there are now.
+
+        Only an action still waiting for delivery changes: a sent one may have been delivered
+        by a concurrent run, and a dead one is settled.
+        """
         self.db.execute(
-            "UPDATE actions SET status = 'failed', last_error = ?, updated_at = ? "
-            "WHERE action_id = ? AND status != 'sent'",
+            "UPDATE actions SET status = 'failed', failures = failures + 1, last_error = ?, "
+            "updated_at = ? WHERE action_id = ? AND status IN ('pending', 'failed')",
+            (error, _now(), action_id),
+        )
+        row = self.db.execute(
+            "SELECT failures FROM actions WHERE action_id = ?", (action_id,)
+        ).fetchone()
+        return row[0]
+
+    def mark_dead(self, action_id: str, error: str) -> None:
+        """Park the action: it is never posted again. Guarded like ``mark_failed``."""
+        self.db.execute(
+            "UPDATE actions SET status = 'dead', last_error = ?, updated_at = ? "
+            "WHERE action_id = ? AND status IN ('pending', 'failed')",
             (error, _now(), action_id),
         )
 
@@ -171,12 +216,22 @@ class Store:
 
 
 def _ensure_schema(db: sqlite3.Connection) -> None:
-    db.executescript(SCHEMA)
+    if db.execute("PRAGMA user_version").fetchone()[0] >= SCHEMA_VERSION:
+        return
+    has_actions = db.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'actions'"
+    ).fetchone()
+    before, after = (_RENAME_OLD_TABLE, _COPY_OLD_ROWS) if has_actions else ("", "")
+    # executescript commits an open transaction before it runs, so BEGIN and COMMIT have to be in
+    # the script for the setup to be all or nothing; `with db` rolls it back if a statement fails.
+    script = f"BEGIN; {before} {SCHEMA} {after} PRAGMA user_version = {SCHEMA_VERSION}; COMMIT;"
+    with db:
+        db.executescript(script)
 
 
 def _stored(row: tuple[Any, ...]) -> StoredAction:
     action_id, task_id, decision, target, reason, message, drafted_by = row[:7]
-    status, attempts, message_id, last_error = row[7:]
+    status, attempts, failures, message_id, last_error = row[7:]
     return StoredAction(
         action=Action(
             action_id=action_id,
@@ -189,6 +244,7 @@ def _stored(row: tuple[Any, ...]) -> StoredAction:
         ),
         status=status,
         attempts=attempts,
+        failures=failures,
         message_id=message_id,
         last_error=last_error,
     )

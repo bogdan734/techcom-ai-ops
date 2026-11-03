@@ -28,6 +28,7 @@ class Settings:
     llm_max_calls: int
     price_input_per_mtok: float
     price_output_per_mtok: float
+    max_failed_runs: int
     policy: Policy
 
     @classmethod
@@ -62,6 +63,7 @@ class Settings:
             llm_max_calls=number("LLM_MAX_CALLS_PER_RUN", 500, int),
             price_input_per_mtok=number("LLM_PRICE_INPUT_PER_MTOK", 4.0),
             price_output_per_mtok=number("LLM_PRICE_OUTPUT_PER_MTOK", 20.0),
+            max_failed_runs=number("MAX_FAILED_RUNS", 0, int),
             policy=Policy(
                 escalate_after_days=number("ESCALATE_AFTER_DAYS", 5, int),
                 stale_after_days=number("STALE_AFTER_DAYS", 5, int),

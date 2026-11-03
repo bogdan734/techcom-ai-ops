@@ -307,3 +307,46 @@ def test_dry_run_is_announced_and_each_would_send_is_audited(settings):
     events = [json.loads(line)["event"] for line in lines]
     assert events[:2] == ["run_started", "dry_run"]
     assert events.count("would_send") == 7
+
+
+def delivery_of(report, task_id: str) -> str:
+    return next(o.delivery for o in report.outcomes if o.task_id == task_id)
+
+
+def test_dead_letter_is_reported_and_exits_2(settings):
+    strict = replace(settings, max_failed_runs=1)
+
+    first = go(strict, faults={"send": ["400"]})
+    second = go(strict)
+
+    assert delivery_of(first, "TC-1001") == "dead"
+    assert [o.delivery for o in first.outcomes].count("sent") == 6
+    assert first.exit_code == 2
+    lines = (settings.out_dir / "audit.jsonl").read_text().splitlines()
+    events = [e for e in map(json.loads, lines) if e["run_id"] == first.run_id]
+    assert [e["event"] for e in events[-2:]] == ["needs_attention", "run_finished"]
+    assert events[-2]["status"] == "dead"
+    assert [a["task_id"] for a in events[-2]["actions"]] == ["TC-1001"]
+    # A POST for it would have succeeded and shown up as a seventh message in the log.
+    assert delivery_of(second, "TC-1001") == "dead"
+    assert second.exit_code == 2
+    assert len(delivered(settings)) == 6
+
+
+def test_without_dead_letter_a_rejection_is_retried_next_run(settings):
+    first = go(settings, faults={"send": ["400"]})
+    second = go(settings)
+
+    assert delivery_of(first, "TC-1001") == "failed"
+    assert delivery_of(second, "TC-1001") == "sent"
+    assert len(delivered(settings)) == 7
+
+
+def test_dry_run_reports_a_dead_letter_instead_of_predicting_a_send(settings):
+    strict = replace(settings, max_failed_runs=1)
+    go(strict, faults={"send": ["400"]})
+
+    report = dry_run(strict)
+
+    assert delivery_of(report, "TC-1001") == "dead"
+    assert report.exit_code == 2
