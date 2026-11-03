@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from contextlib import closing
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -64,7 +65,24 @@ class Store:
         # WAL lets a second run read while another writes; busy_timeout makes it wait, not fail.
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute("PRAGMA busy_timeout=5000")
-        self.db.executescript(SCHEMA)
+        _ensure_schema(self.db)
+
+    @classmethod
+    def snapshot(cls, path: Path) -> Store:
+        """An in-memory copy of the state at ``path``, for a dry run: every write stays in it.
+
+        The file is opened with ``mode=ro``, which SQLite enforces itself, copied and closed.
+        A missing file gives an empty store, and neither the file nor its directory is created.
+        """
+        store = cls.__new__(cls)  # not __init__: it would create the directory and the file
+        store.db = sqlite3.connect(":memory:", isolation_level=None)
+        if path.exists():
+            # as_uri escapes '#', '?' and spaces; "file:" + path would open a different file.
+            uri = path.resolve().as_uri() + "?mode=ro"
+            with closing(sqlite3.connect(uri, uri=True)) as source:
+                source.backup(store.db)
+        _ensure_schema(store.db)
+        return store
 
     def close(self) -> None:
         self.db.close()
@@ -150,6 +168,10 @@ class Store:
         if kept is None:
             raise RuntimeError(f"reading {cache_key} vanished right after it was stored")
         return kept
+
+
+def _ensure_schema(db: sqlite3.Connection) -> None:
+    db.executescript(SCHEMA)
 
 
 def _stored(row: tuple[Any, ...]) -> StoredAction:

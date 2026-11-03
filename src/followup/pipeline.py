@@ -63,7 +63,7 @@ class FollowUpService:
         store: Store,
         reader: NoteReader,
         drafter: Drafter,
-        outbox: Outbox,
+        outbox: Outbox | None,
     ):
         self.today = today
         self.policy = policy
@@ -142,6 +142,21 @@ class FollowUpService:
             message, drafted_by = stored.action.message, stored.action.drafted_by
         else:
             message, drafted_by = self.drafter.draft(task, assessment, verdict, people, flagged)
+        if self.outbox is None:
+            # Dry run: there is no outbox, so nothing can be claimed or posted.
+            emit(
+                "would_send",
+                f"{task.task_id}: {verdict.decision.value} -> {verdict.target}: "
+                "would be sent (dry run)",
+                task_id=task.task_id,
+                action_id=outcome.action_id,
+                decision=verdict.decision.value,
+                target=verdict.target,
+            )
+            outcome.message = message
+            outcome.drafted_by = drafted_by
+            outcome.delivery = "would_send"
+            return outcome
         delivery = self.outbox.deliver(
             Action(
                 action_id=outcome.action_id,
@@ -180,10 +195,13 @@ def run(
     faults: Mapping[str, Sequence[str]] | None = None,
     llm: LLMClient | None = None,
     retry: RetryPolicy | None = None,
+    dry_run: bool = False,
 ) -> RunReport:
     """Process every task once, against the in-process mock APIs.
 
     ``llm`` and ``retry`` default to what the settings describe; tests pass their own.
+    A dry run decides and drafts over an in-memory copy of the state and builds no outbox, so
+    it cannot send, and state.db and the delivery log stay as they were.
     """
     llm = llm or make_llm(settings)
     if faults and faults.get("llm"):
@@ -200,10 +218,12 @@ def run(
             model=llm.model,
             faults=dict(faults or {}),
         )
+        if dry_run:
+            emit("dry_run", "dry run: decisions and drafts only, nothing is sent or stored")
         backend = MockBackend(
             load_fixture(settings.tasks_file), out / "delivery_log.jsonl", faults=faults
         )
-        store = Store(out / "state.db")
+        store = Store.snapshot(out / "state.db") if dry_run else Store(out / "state.db")
         try:
             with backend.client() as http:
                 try:
@@ -222,13 +242,18 @@ def run(
                     emit("record_rejected", problem, level=logging.WARNING, problem=problem)
 
                 gateway = LLMGateway(llm, settings.llm_max_calls)
+                outbox = (
+                    None
+                    if dry_run
+                    else Outbox(store, MessagesApi(http, policy), policy, CircuitBreaker())
+                )
                 service = FollowUpService(
                     settings.today,
                     settings.policy,
                     store,
                     NoteReader(gateway, store),
                     Drafter(gateway, settings.today),
-                    Outbox(store, MessagesApi(http, policy), policy, CircuitBreaker()),
+                    outbox,
                 )
                 report.outcomes = service.process(tasks)
                 report.llm = gateway.usage

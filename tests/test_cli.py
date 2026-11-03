@@ -18,6 +18,18 @@ def test_run_writes_decisions_delivery_and_audit_logs(tmp_path, capsys):
     assert "delivery sent 7" in capsys.readouterr().out
 
 
+def test_dry_run_flag_sends_nothing(tmp_path, capsys):
+    out = tmp_path / "out"
+
+    code = main(
+        ["run", "--tasks", str(FIXTURE), "--today", "2026-10-21", "--out", str(out), "--dry-run"]
+    )
+
+    assert code == 0
+    assert not (out / "delivery_log.jsonl").exists()
+    assert "would_send 7" in capsys.readouterr().out
+
+
 def test_invalid_date_is_a_configuration_error(tmp_path, capsys):
     code = main(["run", "--today", "21/10/2026", "--out", str(tmp_path)])
 

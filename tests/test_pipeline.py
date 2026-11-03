@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import replace
 from datetime import date
@@ -40,6 +41,18 @@ def go(settings, faults=None, llm=None):
 def delivered(settings) -> list[dict]:
     path = settings.out_dir / "delivery_log.jsonl"
     return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
+
+
+def dry_run(settings, faults=None, llm=None):
+    return run(settings, faults, llm or RecordingStub(), no_wait_policy(), dry_run=True)
+
+
+def state_hashes(settings) -> dict[str, str]:
+    """What a dry run must not change: the bytes of the database and of the delivery log."""
+    return {
+        name: hashlib.sha256((settings.out_dir / name).read_bytes()).hexdigest()
+        for name in ("state.db", "delivery_log.jsonl")
+    }
 
 
 def test_fixture_decisions_and_deliveries(settings):
@@ -243,3 +256,54 @@ def test_audit_log_records_every_decision(settings):
     assert sum(e["event"] == "decision" for e in events) == 10
     assert events[-1]["event"] == "run_finished"
     assert events[-1]["deliveries"] == {"sent": 7}
+
+
+def test_dry_run_leaves_state_and_delivery_log_byte_identical(settings, tmp_path):
+    go(settings)
+    records = json.loads(FIXTURE.read_text())
+    records[0]["last_update"] = "2026-10-21"
+    records[0]["notes"] = "Still splicing, crew short-handed."
+    changed = tmp_path / "tasks.json"
+    changed.write_text(json.dumps(records))
+    before = state_hashes(settings)
+
+    report = dry_run(replace(settings, tasks_file=changed))
+
+    assert state_hashes(settings) == before
+    assert {o.task_id: o.delivery for o in report.outcomes if o.decision != "no_action"} == {
+        task_id: "would_send" if task_id == "TC-1001" else "duplicate_suppressed"
+        for task_id, (decision, _) in EXPECTED.items()
+        if decision != "no_action"
+    }
+
+
+def test_dry_run_on_fresh_state_writes_no_state(settings):
+    report = dry_run(settings)
+
+    assert not (settings.out_dir / "state.db").exists()
+    assert not (settings.out_dir / "delivery_log.jsonl").exists()
+    assert [o.delivery for o in report.outcomes].count("would_send") == 7
+    assert (settings.out_dir / "decisions.json").exists()
+    assert report.exit_code == 0
+
+
+def test_real_run_after_a_dry_run_sends_what_it_predicted(settings):
+    predicted = dry_run(settings)
+    llm = RecordingStub()
+
+    actual = go(settings, llm=llm)
+
+    would_send = {o.action_id for o in predicted.outcomes if o.delivery == "would_send"}
+    assert len(would_send) == 7
+    assert {o.action_id for o in actual.outcomes if o.delivery == "sent"} == would_send
+    # The dry run pinned no reading, so the real run still has to ask the model.
+    assert "read_note" in {request.kind for request in llm.requests}
+
+
+def test_dry_run_is_announced_and_each_would_send_is_audited(settings):
+    dry_run(settings)
+
+    lines = (settings.out_dir / "audit.jsonl").read_text().splitlines()
+    events = [json.loads(line)["event"] for line in lines]
+    assert events[:2] == ["run_started", "dry_run"]
+    assert events.count("would_send") == 7

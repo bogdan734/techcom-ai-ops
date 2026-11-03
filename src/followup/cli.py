@@ -40,6 +40,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="inject failures, e.g. tasks=429,503 send=timeout-after-commit llm=garbagex10; "
         + "; ".join(f"{route}: {', '.join(sorted(faults))}" for route, faults in ROUTES.items()),
     )
+    run_cmd.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="decide and draft, but send nothing and leave state.db and the delivery log alone",
+    )
     return parser
 
 
@@ -57,7 +62,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         settings = Settings.from_env(env)
         faults = parse_faults(args.fault)
-        report = run(settings, faults)
+        report = run(settings, faults, dry_run=args.dry_run)
     except (ConfigError, FaultSpecError) as exc:
         print(f"followup: configuration error: {exc}", file=sys.stderr)
         return 1
