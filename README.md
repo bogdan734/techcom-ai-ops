@@ -8,7 +8,7 @@
 [![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![Anthropic](https://img.shields.io/badge/LLM-Anthropic%20Messages%20API-D97757)](https://docs.anthropic.com/)
 [![SQLite](https://img.shields.io/badge/state-SQLite-003B57?logo=sqlite&logoColor=white)](https://www.sqlite.org/)
-[![Tests](https://img.shields.io/badge/tests-218%20passed-2ea44f)](tests)
+[![Tests](https://img.shields.io/badge/tests-287%20passed-2ea44f)](tests)
 [![License](https://img.shields.io/badge/license-MIT-black)](LICENSE)
 
 Dates and statuses decide **whether** a task needs attention ·
@@ -32,7 +32,8 @@ Solution to the TechCom AI Engineer assessment. The service pulls tasks from a m
 | **Messaging provider down** | 3 deliveries fail after bounded retries, 4 deferred by the circuit breaker; the next run sends all 7, once |
 | **Model down or answering garbage** | the 4 tasks routed by their note are put `on_hold`, the other 3 go out with template wording; the next run finishes the 4, once |
 | **Prompt injection** in TC-1006 | flagged, kept away from the model; the task gets its normal overdue follow-up |
-| **Tests** | 218 in 0.8 s, no network, no API key |
+| **Opt-in hardening** | dry run, dead letters, reminder cadence and an approval gate for escalations, each off until switched on ([how they work](#opt-in-hardening)) |
+| **Tests** | 287 in 1.01 s, no network, no API key |
 
 ---
 
@@ -126,9 +127,10 @@ cp .env.example .env
 ```
 
 ```bash
-followup run    # first run: 7 follow-ups delivered
-followup run    # same data: 7 duplicates suppressed, nothing sent
-make demo       # two runs, a flaky API, then a model that answers garbage and recovers
+followup run --dry-run   # preview on fresh state: 7 would_send, nothing sent, no state.db written
+followup run             # first run: 7 follow-ups delivered
+followup run             # same data: 7 duplicates suppressed, nothing sent
+make demo                # two runs, a flaky API, then a model that answers garbage and recovers
 ```
 
 `.env.example` sets the evaluation date to 2026-10-21 and the deterministic `stub` provider,
@@ -172,11 +174,49 @@ The tasks API failing four times in a row aborts the run before any message is s
 
 </details>
 
+<details>
+<summary><b>Dry run, dead letters, approvals and reminders</b></summary>
+
+<br/>
+
+All four are opt-in ([how they work](#opt-in-hardening)) and run offline with the `stub`
+provider. `ACTION_ID` is an id from the `list` output above it.
+
+```bash
+# what would a run do? Decisions and drafts only; state.db and the delivery log stay as they are.
+# It rewrites decisions.json, so use another --out when the last real run's file matters
+followup run --dry-run --out out/preview
+
+# the provider is down for two runs, and a follow-up that fails in 2 runs is parked as dead
+MAX_FAILED_RUNS=2 followup run --out out/dead --fault send=503x12
+MAX_FAILED_RUNS=2 followup run --out out/dead --fault send=503x12   # exit 2: 3 dead letters
+followup list dead --out out/dead
+followup requeue ACTION_ID --out out/dead
+followup run --out out/dead     # provider back: 5 go out, 2 stay dead (exit 2)
+
+# escalations wait for a person
+APPROVE_ESCALATIONS=true followup run --out out/gate   # TC-1008 waits, 6 go out, exit 0
+followup list awaiting_approval --out out/gate
+followup approve ACTION_ID --out out/gate
+APPROVE_ESCALATIONS=true followup run --out out/gate   # the approved escalation goes out, once
+
+# an unchanged task is followed up again every 2 days, then escalated once
+REMIND_EVERY_DAYS=2 followup run --out out/remind --today 2026-10-21   # 7 follow-ups
+REMIND_EVERY_DAYS=2 followup run --out out/remind --today 2026-10-23   # 5 reminders, TC-1001 escalated
+```
+
+</details>
+
 | Exit code | Meaning |
 |---|---|
-| `0` | every follow-up that was due is delivered |
+| `0` | every follow-up that was due is delivered, or is an escalation waiting for approval |
 | `1` | the run could not start or could not load tasks; nothing was sent |
-| `2` | the run finished, but some follow-ups are `failed` or `deferred` (provider down, or a task `on_hold` because the model could not read its note) and will go out next run |
+| `2` | the run finished, but some follow-ups are `failed`, `deferred` or `dead` (provider down, a task `on_hold` because the model could not read its note, or a dead letter). The first two go out next run; a `dead` one waits for `followup requeue` |
+
+A dry run follows the same rule. An escalation waiting for approval keeps the exit code at 0, since
+a queue that waits for people would alarm every scheduled run; the run summary lists it instead.
+`followup list` exits 1 when `--out` holds no `state.db`; `requeue` and `approve` exit 1 in that
+case too, and when an id is not in the status they expect.
 
 ---
 
@@ -188,10 +228,41 @@ Everything a run writes goes to `--out` (default `out/`):
 |---|---|
 | `decisions.json` | one record per task from the latest run: decision, target, reason, message, delivery status, action id, who drafted the message, how the note was read, flags |
 | `delivery_log.jsonl` | the mock delivery log: one line per message the provider accepted, with its idempotency key |
-| `audit.jsonl` | append-only, one JSON event per line with the run id: decisions, model calls with token counts, rejected answers, retries, reconciliations, flags, run summary |
-| `state.db` | SQLite: the outbox of follow-ups and the note readings decisions were based on |
+| `audit.jsonl` | append-only, one JSON event per line with the run id: decisions, model calls with token counts, rejected answers, retries, reconciliations, flags, run summary; with the opt-in features also `dry_run`, `would_send`, `dead_letter`, `approval_requested`, `needs_attention`, `action_approved` and `action_requeued` |
+| `state.db` | SQLite: the outbox of follow-ups and the note readings decisions were based on. A file from the first version is upgraded in place when it is first opened; its rows, attempts and message ids are kept |
 
-[`docs/sample`](docs/sample) holds the artefacts of the runs described above:
+The `delivery` field of a record in `decisions.json` says what became of the follow-up:
+
+| `delivery` | Meaning |
+|---|---|
+| `none` | the task needs no action |
+| `sent` | posted in this run |
+| `reconciled` | the provider already held it, so it was recorded as sent |
+| `duplicate_suppressed` | the same follow-up was delivered in an earlier run |
+| `failed` | not delivered after bounded retries; the next run tries again |
+| `deferred` | not tried: the circuit breaker is open, or the task is `on_hold` |
+| `would_send` | dry run only: a real run would post it |
+| `dead` | parked after a permanent rejection or too many failed runs; not sent until `followup requeue` |
+| `awaiting_approval` | an escalation held until `followup approve` |
+
+A dry run rewrites `decisions.json` and appends to `audit.jsonl` in its `--out` directory. It does
+not touch `state.db` or `delivery_log.jsonl`: both stay byte for byte as they were (SQLite may
+leave an empty `state.db-wal` and a `state.db-shm` beside the database; they hold no rows and the
+next real run removes them). Use a separate `--out` when the last real run's `decisions.json`
+matters.
+
+A dry run logs `would be sent (dry run)` where a real run logs `sent`, and its summary counts
+`would_send`:
+
+```text
+02:45:13 | INFO    | TC-1009: request_eta -> warehouse (Waiting on materials, due today)
+02:45:13 | INFO    | TC-1009: request_eta -> warehouse: would be sent (dry run)
+02:45:13 | INFO    | TC-1010: no_action (Task is done)
+02:45:13 | INFO    | run 14c1ca27afbf finished in 0.01s: 10 tasks | decisions clarify_missing_info 2, escalate 1, follow_up_owner 2, no_action 3, request_eta 2 | delivery would_send 7 | LLM 10 calls, 0+0 tokens, ~$0.0000
+```
+
+[`docs/sample`](docs/sample) holds the artefacts of the runs described above, all with the default
+settings:
 [first run](docs/sample/run-1.log) ·
 [re-run](docs/sample/run-2-rerun.log) ·
 [flaky API](docs/sample/run-3-flaky-api.log) ·
@@ -311,7 +382,8 @@ sequenceDiagram
 
 - **Identity.** `action_id = sha256(task_id, decision, recipient, task state)`, where the task
   state covers status, owner, due date, last update and notes. The wording is left out on
-  purpose: two drafts of the same follow-up are the same follow-up.
+  purpose: two drafts of the same follow-up are the same follow-up. A reminder adds its round
+  number to the hash; round 0 hashes what it always did, so ids stored earlier stay valid.
 - **Before sending**, the action is stored as `pending` and the attempt is counted. The
   connection runs in autocommit mode, so both are on disk before the request leaves.
 - **On a lost response** (timeout, dropped connection) the outcome is unknown. The outbox asks
@@ -322,7 +394,9 @@ sequenceDiagram
   blind.
 - **Changed data** gives a new state and a new action. Crossing a threshold changes the
   decision: an owner reminded on day 3 is not reminded again, and the task escalates once on
-  day 5.
+  day 5. Unchanged data and decision give no second message, unless the
+  [reminder cadence](#opt-in-hardening) is on: then each round is its own action, and a change
+  starts again at round 0.
 
 ### Retries and outages
 
@@ -333,6 +407,73 @@ scheduled run is a cheaper place to wait than a blocked worker. Sends follow the
 plus the reconciliation above. After 3 failed deliveries in a row the circuit breaker defers
 the rest of the run (`deferred`, exit code 2) instead of spending every action's retry budget
 against a dead provider. The LLM gateway has its own breaker.
+
+### Opt-in hardening
+
+Four additions are off until you switch them on. With every new key left at its default and no
+`--dry-run`, the service behaves exactly as before: the same `decisions.json`, delivery log, exit
+codes and audit events. The one change you can see is in `state.db`, which is upgraded in place
+the first time it is opened; rows, attempts and message ids are kept.
+
+**Dry run.** `followup run --dry-run` runs the whole pipeline over an in-memory copy of
+`state.db` and builds no outbox, so no code path can post a message. It decides and drafts as a
+real run would: a follow-up a real run would send is `would_send`, one it would skip stays
+`duplicate_suppressed`. The file is opened with SQLite's read-only mode, and a missing file is
+not created. Readings made in the copy are not kept, so the next real run reads those notes
+again, and the model calls a dry run makes are real calls.
+
+**Dead letters.** With `MAX_FAILED_RUNS` above 0, an action that failed to deliver in that many
+runs is parked as `dead`. So is an action the provider refuses outright, with HTTP 400, 413 or
+422: the message itself is wrong, and every resend would be refused too. Every other failure,
+401, 403, 404 and 408 included, is an ordinary failed run, counted like a 503. A dead action is
+neither looked up nor posted again; each run exits 2 and lists it until it is requeued or its
+task changes. `followup list dead` shows each one with its attempts, failed runs, last error and
+message. `followup requeue ACTION_ID` makes it `pending` again and keeps its attempts, so the
+next run asks the provider before it resends anything: the request that parked it may have been
+delivered after all. `list`, `requeue` and `approve` read only the output directory (`--out`,
+else `OUT_DIR`, else `out`), so an unrelated bad setting cannot keep an operator from the queue.
+
+**Approval.** With `APPROVE_ESCALATIONS=true`, an escalation is drafted and stored as
+`awaiting_approval` instead of being sent, and the rest of the run goes out. The run still exits
+0 and lists the waiting escalations in its summary. `followup list awaiting_approval` shows the
+wording, `followup approve ACTION_ID` releases it, and the next run sends it once, with the
+wording that was reviewed. There is no reject: an escalation nobody approves never goes out, and
+a change to the task gives it a new identity. The final escalation of the reminder cadence
+passes through the same gate; escalations stored before the gate was switched on are not held. A
+dry run reports a new escalation as `awaiting_approval` too, and says that it stores nothing.
+
+**Reminders.** With `REMIND_EVERY_DAYS` above 0, a task whose data has not changed is followed
+up again that many days after its previous message was delivered, `MAX_REMINDERS` times at most
+(default 2), and then escalated once to `ESCALATION_TARGET`. For TC-1002 at 2 days that is the
+request to the warehouse on day 0, reminders on days 2 and 4, and an escalation to
+`project_manager` on day 6. Every round is its own action: round 0 hashes what it always did, so
+ids stored earlier stay valid, and later rounds add the round number. The days count from the
+evaluation date on which the previous round was confirmed sent, so a round that never went out
+holds back the next one, and a replay with `--today` counts the same days as a live run. A
+delivery recorded without that date, as the first version did, counts from the day it was last
+updated. A changed task starts again at round 0, and a task that crosses the escalation
+threshold is escalated as before. An escalation is never repeated: the final one has the same
+identity as the threshold escalation of the same state, so only one of the two is sent.
+
+The statuses an action moves through:
+
+```mermaid
+stateDiagram-v2
+    [*] --> pending: claimed before the first send
+    [*] --> awaiting_approval: escalation with the gate on
+    awaiting_approval --> pending: followup approve
+    pending --> sent: delivered or found at the provider
+    pending --> failed: delivery failed
+    failed --> failed: failed again
+    failed --> sent: a later run delivers it
+    pending --> dead: refused outright or too many failed runs
+    failed --> dead: refused outright or too many failed runs
+    dead --> pending: followup requeue
+```
+
+`sent` is final. A `dead` or `awaiting_approval` action is never posted; only `followup requeue`
+and `followup approve` move it on. In a run, the reminder step comes right after the rules, the
+approval gate sits between drafting and the outbox, and a dry run takes the place of the outbox.
 
 ### Prompt injection
 
@@ -368,8 +509,9 @@ it in layers:
 - **Recipients.** The data has no directory, so clarifications and escalations go to a
   `project_manager` mailbox and materials ETA requests to `warehouse`, both configurable.
   The owner is the only person the service ever addresses by name.
-- **Cadence.** One follow-up per task state and decision; no periodic reminders (see
-  [limitations](#-what-is-incomplete-and-what-i-would-change-for-production)).
+- **Cadence.** One follow-up per task state and decision, so an unchanged task is not chased
+  again. `REMIND_EVERY_DAYS` turns on reminders, counted in calendar days from the evaluation
+  date on which the previous message was delivered ([how it works](#opt-in-hardening)).
 - **Thresholds.** Escalate at 5 days overdue, status check after 5 days without an update,
   reminder when a task has not started 2 days before its due date. All configurable.
 - **Notes route, they do not trigger.** A note can change who is contacted about a blocked or
@@ -392,6 +534,11 @@ it in layers:
 | Template when a draft fails the checks | Send nothing | The decision is already made and safe; only the wording loses context from the note |
 | Stop when `Retry-After` exceeds 8 s | Sleep as long as asked | The next scheduled run is a cheaper place to wait than a blocked worker |
 | Default model `claude-opus-5-5` | A small model from day one | Start from the strongest model, measure tokens (logged per call), then step down on a labelled set of notes |
+| Dry run over an in-memory copy of `state.db`, with no outbox | Read-only flags on each store write | One missed flag would write real state; with a copy every write lands in memory and no code path reaches a POST. The cost is that readings made in a dry run are not kept |
+| Dead letter after `MAX_FAILED_RUNS` runs with a failed delivery, or at once for HTTP 400, 413 or 422 | After N POST attempts | Attempts per run vary (`Retry-After` cut-off, breaker, reconciliation), while runs follow the schedule; only a refusal of the message itself is permanent, because 401, 403, 404 and 408 blame the credentials, the endpoint or the timing and one fix repairs every action. The cost is that an outage counts as failed runs, so the limit goes above the longest outage |
+| Reminders count days from the evaluation date on which the previous round was confirmed sent | Task dates, or the wall-clock time the action was stored | Task dates would need a different anchor per rule, and the wall clock ignores `EVALUATION_DATE` (tests, replays); one anchor also means a round that never went out holds back the next |
+| An escalation goes out once per task state, the final one included | Repeat escalations like reminders | It is the top of the ladder, and with the gate on a repeat would queue another one for approval every round; the final one shares its id with the threshold escalation, so only one of the two is sent |
+| A waiting escalation exits 0 and shows in the run summary; `dead` exits 2 | Exit 2 for `awaiting_approval` too | On a 15-minute schedule it would alarm all day over a queue that waits for people; a dead letter is a failed delivery that only a person can release |
 
 ---
 
@@ -412,8 +559,18 @@ Environment variables, read from `.env` if present ([`.env.example`](.env.exampl
 | `ESCALATE_AFTER_DAYS` | `5` | days overdue before escalation |
 | `STALE_AFTER_DAYS` | `5` | days without an update before a status check |
 | `DUE_SOON_DAYS` | `2` | reminder window for tasks not started yet |
+| `REMIND_EVERY_DAYS` / `MAX_REMINDERS` | `0` (off) / `2` | days after a delivered follow-up before it is repeated, and how many reminders come before the one escalation |
+| `MAX_FAILED_RUNS` | `0` (off) | park an action as `dead` once delivery failed in this many runs, or at once when the provider refuses the message itself (HTTP 400, 413 or 422); see below |
+| `APPROVE_ESCALATIONS` | `false` | `true` or `1` holds each escalation as `awaiting_approval` until `followup approve`; `false` or `0` sends it as before; anything else is a configuration error |
 | `CLARIFY_TARGET` / `ESCALATION_TARGET` / `MATERIALS_TARGET` | `project_manager` / `project_manager` / `warehouse` | mailboxes for role-addressed messages |
 | `TASKS_FILE` / `OUT_DIR` | `fixtures/tasks.json` / `out` | input fixture, state and artefacts |
+
+`MAX_FAILED_RUNS` counts runs in which an action failed to deliver, not requests. While the
+provider is down, the first three actions of every run fail and count, and the circuit breaker
+defers the rest, so set it above the longest outage you expect, counted in runs: at a 15-minute
+schedule, 12 runs are 3 hours. With the setting above 0, a refusal of the message itself (HTTP
+400, 413 or 422) parks the action at once; 401, 403, 404 and 408 are ordinary failed runs and
+count like a 503.
 
 ---
 
@@ -423,10 +580,10 @@ Environment variables, read from `.env` if present ([`.env.example`](.env.exampl
 pytest && ruff check src tests && ruff format --check src tests
 ```
 
-**218 tests, under a second.** The tasks API, the messaging provider and the model are served
-in-process (`httpx2.MockTransport`), so the suite needs no network and no key. The
-Anthropic adapter is tested against a mocked Messages API: request shape, structured output
-config, thinking blocks, refusals, truncation, error classification.
+**287 tests; `pytest` prints `287 passed in 1.01s`.** The tasks API, the messaging provider
+and the model are served in-process (`httpx2.MockTransport`), so the suite needs no network
+and no key. The Anthropic adapter is tested against a mocked Messages API: request shape,
+structured output config, thinking blocks, refusals, truncation, error classification.
 
 Among the scenarios: every decision rule and the exact threshold boundaries; ambiguous dates and odd statuses; duplicate and
 malformed records; a second run with unchanged data; an escalation ladder across days;
@@ -435,11 +592,17 @@ provider commit and the bookkeeping, a lookup outage; the circuit breaker; malfo
 extra-field and wrong-type model answers; a model outage, a tight call budget and a model
 switch, each followed by more runs that must not resend anything; drafts with invented
 dates, numbers, deadlines, people, links and status requests; the injected note and an
-injected title never reaching the model.
+injected title never reaching the model; a dry run that leaves `state.db` and the delivery
+log byte for byte identical; a `state.db` from the first version upgraded without losing a
+row, and an upgrade that fails halfway rolled back whole; refusals and repeated failures
+parked as dead letters; escalations held for approval and sent once; the reminder ladder over
+daily runs, ending in one escalation.
 
 GitHub Actions runs lint, the format check and the tests on Python 3.11, 3.12 and 3.13,
 then `make demo` and checks that each of its delivery logs holds exactly 7 messages under 7
-distinct idempotency keys.
+distinct idempotency keys. The new features are pinned by the tests and shown with the commands
+in [Quick start](#-quick-start); `make demo` stays the regression check for the original
+behaviour.
 
 ---
 
@@ -447,12 +610,13 @@ distinct idempotency keys.
 
 ```
 src/followup/
-├── cli.py               # `followup run`, exit codes
+├── cli.py               # `followup run`, `list`, `requeue`, `approve`, exit codes
 ├── config.py            # settings from the environment
-├── pipeline.py          # one run: fetch, decide, draft, deliver, report
+├── pipeline.py          # one run: fetch, decide, draft, deliver, report; or a dry run
 ├── models.py            # Task, Verdict, Action, action identity
 ├── normalize.py         # raw records -> Task, data-quality issues
 ├── rules.py             # deterministic assessment and decisions
+├── cadence.py           # reminder rounds and the final escalation
 ├── notes.py             # note reading: stored per task and note, or asked
 ├── drafting.py          # message drafting with checks and template fallback
 ├── templates.py         # deterministic messages
@@ -465,12 +629,12 @@ src/followup/
 │   └── stub.py          # deterministic offline provider
 ├── api.py               # tasks and messaging HTTP clients
 ├── retry.py             # backoff, Retry-After, circuit breaker
-├── delivery.py          # outbox: claim, send, reconcile
-├── store.py             # SQLite outbox and note readings
+├── delivery.py          # outbox: claim, send, reconcile, dead letters
+├── store.py             # SQLite outbox, note readings, schema migration
 ├── mock_api.py          # in-process tasks and messaging APIs
 ├── faults.py            # scripted failures for the APIs and the model
 └── audit.py             # console log and audit.jsonl
-tests/                   # 218 tests, one module per source module
+tests/                   # 287 tests, grouped by the module they pin
 fixtures/tasks.json      # the supplied fixture
 docs/sample/             # artefacts of the demo runs
 ```
@@ -516,16 +680,29 @@ audit log is append-only.
 
 - **Delivery is mocked.** A real e-mail or Slack adapter needs the same idempotency key, or a
   way to look up what it sent, so that reconciliation keeps working.
-- **One follow-up per state and decision.** A task that stays overdue with no change gets one
-  reminder, then one escalation. A reminder cadence (every N days) would add the interval to
-  the action identity.
-- **Superseded actions stay pending.** When a task changes while its previous follow-up is
-  still `failed`, the new state gets its own action and the old one is left as it is. A
-  clean-up step could close it.
-- **No dead-letter queue.** An action the provider rejects with a 4xx is retried every run;
-  capping attempts and alerting would be the next step.
-- **No human approval for escalations.** A `held` status reviewed in a small UI would fit
-  into the outbox without changing the rest.
+- **Reminders use one interval.** `REMIND_EVERY_DAYS` is a number of calendar days for every
+  decision and recipient: there is no working-day calendar, no interval per project and no way
+  to snooze one task.
+- **Superseded actions stay where they are.** When a task changes, its new state gets its own
+  action and the old one is left as it is, whether it is `failed`, `dead` or
+  `awaiting_approval`, so `followup list` can show it. A run only delivers the follow-up for a
+  task's current state: approving or requeueing a superseded action sends nothing unless the
+  task returns to that state, so check the task first. A clean-up step could close them.
+- **Dead letters count runs, so an outage counts too.** While the provider is down, the first
+  three actions of every run fail and count, and the breaker defers the rest: an outage longer
+  than `MAX_FAILED_RUNS` runs parks follow-ups three at a time, in task order. Set it above the
+  longest outage you expect, in runs (at a 15-minute schedule, 12 runs are 3 hours). A refusal
+  of the message itself (HTTP 400, 413 or 422) parks an action at once; with the default `0`, a
+  refused follow-up is retried on every run. Alerting is only exit code 2 and the
+  `needs_attention` line of the run summary: the service does not page anyone, export a metric
+  or open a ticket.
+- **Approve and requeue exist only in the CLI.** There is no reject and no UI, and no check of
+  who may run them: the audit log records the user name (`by`), and anyone who can write to the
+  `--out` directory can release an action. A small review UI could sit on top of
+  `followup list` without changing the rest.
+- **A dry run is a forecast.** It keeps nothing, so the next real run reads each note again.
+  The stub gives the same answer; with the real model a note can be read differently, and that
+  can change the recipient.
 - **Recipients are role mailboxes from configuration.** Real routing needs a directory:
   project manager per project, warehouse per region.
 - **A long model outage holds note-dependent tasks.** Exit code 2 raises the alarm; switching
