@@ -184,3 +184,11 @@ def test_list_shows_a_dash_for_an_action_without_an_error(tmp_path, capsys):
 
     assert main(["list", "awaiting_approval", "--out", str(out)]) == 0
     assert "attempts 0, failed runs 0 | -\n" in capsys.readouterr().out
+
+
+def test_state_commands_read_a_blank_out_dir_setting_as_run_does(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("OUT_DIR", "  ")
+
+    assert main(["list", "dead"]) == 1
+    assert "followup: no state at out/state.db" in capsys.readouterr().err

@@ -89,7 +89,7 @@ def _add_out(command: argparse.ArgumentParser) -> None:
 def _out_dir(args: argparse.Namespace) -> Path:
     # list, requeue and approve need the directory and nothing else, so an unrelated bad setting
     # (a missing API key, say) cannot keep an operator from the parked actions.
-    return Path(args.out or os.environ.get("OUT_DIR") or DEFAULT_OUT_DIR)
+    return Path((args.out or os.environ.get("OUT_DIR", "")).strip() or DEFAULT_OUT_DIR)
 
 
 def _settings(args: argparse.Namespace) -> Settings:
