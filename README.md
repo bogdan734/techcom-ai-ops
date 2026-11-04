@@ -305,16 +305,34 @@ settings:
 ## 🧠 How it works
 
 ```mermaid
-flowchart LR
-    API["Mock tasks API<br/>paged, faults on demand"] -->|"retries, backoff"| N["normalise<br/>no guessing"]
-    N --> A["assess<br/>dates, status, gaps"]
-    A -->|"blocked or late"| R["note reader<br/>screen, stored reading, model"]
-    A -->|"otherwise"| D["decide<br/>decision, recipient, reason"]
-    R --> D
-    D -->|"action needed, not yet sent"| W["drafter<br/>model, checks, template"]
-    W --> O["outbox<br/>SQLite, Idempotency-Key"]
-    O -->|"POST /messages"| P["Mock messaging API<br/>delivery_log.jsonl"]
+flowchart TB
+    subgraph DECIDE["decide, per task"]
+        direction LR
+        API["Mock tasks API<br/>retries, backoff"] --> N["normalise<br/>no guessing"]
+        APP["tasks made in<br/>the app and the<br/>moves on them"] -.-> N
+        N --> A["assess<br/>dates, status,<br/>gaps"]
+        A -->|"blocked or late"| R["note reader<br/>screen, stored<br/>reading, model"]
+        A -->|"otherwise"| D["decide<br/>decision, recipient,<br/>reason"]
+        R --> D
+    end
+    subgraph SEND["draft and send"]
+        direction LR
+        C["reminders<br/>rounds, then one<br/>escalation"] --> W["drafter<br/>model, checks,<br/>template"]
+        W --> G["approval gate<br/>escalations wait<br/>for a person"]
+        G --> O["outbox<br/>SQLite,<br/>Idempotency-Key"]
+        G -.->|"dry run"| V["would_send<br/>nothing stored<br/>or posted"]
+        T["team pass<br/>notices, checks,<br/>chat, calls"] -.-> O
+        O -->|"POST /messages"| P["Mock messaging API<br/>delivery_log.jsonl"]
+        O -.->|"parked"| X["dead letter<br/>refused, or failed in<br/>too many runs;<br/>followup requeue"]
+    end
+    DECIDE -->|"action needed"| SEND
+    classDef optin stroke-dasharray: 5 4
+    class APP,C,G,V,T,X optin
 ```
+
+Dashed boxes and arrows are opt-in; with their settings left alone, the solid path is the
+whole run. Every run takes a lock on its out directory first, and a second run in the same
+directory exits 75.
 
 ### Decision rules
 
@@ -572,9 +590,55 @@ In the app, sign in as `noah` (a manager) and press **Advance** to play the firs
 | `reduced` | 1, on about one task in `REDUCED_SKIP_LOT` | 2 | a long clean run (score of at least `TRUST_REDUCED_SCORE`) |
 | `halted` | none: the issuer's manager reviews | n/a | repeated failures on `tightened`, until `followup team clear PERSON` |
 
+A person starts at `normal`, and the first `TRUST_PROBATION_TASKS` results never move the level.
+The numbers below are the defaults; each is a setting.
+
+```mermaid
+stateDiagram-v2
+    direction LR
+    [*] --> normal: a newcomer starts here
+    normal --> tightened: 2 failures in the last 5 results
+    normal --> reduced: score at least 0.7
+    tightened --> normal: 5 passes in a row
+    tightened --> halted: 3 failures while tightened
+    reduced --> normal: a failure, or the score falls below 0.7
+    halted --> normal: followup team clear PERSON
+```
+
 The levels borrow the switching rules of acceptance sampling (normal, tightened and reduced inspection); the thresholds are this repository's own and are settings. Research and sources: [docs/research/2026-11-04-task-accountability.md](docs/research/2026-11-04-task-accountability.md).
 
+### When nobody answers
+
+```mermaid
+flowchart TB
+    subgraph QUIZ["a completion check nobody answers"]
+        direction LR
+        q0["the check<br/>by message"] -->|"1 step"| q1["reminder<br/>by message"]
+        q1 -->|"2 steps"| q2["phone call"]
+        q2 -->|"machine or no answer"| q3["issuer is told"]
+    end
+    subgraph CHAT["a question nobody answers"]
+        direction LR
+        c0["asked<br/>the issuer is told"] -->|"1 SLA"| c1["the issuer's<br/>manager"]
+        c1 -->|"2 SLAs"| c2["the next<br/>level up"]
+        c2 -->|"and so on"| c3["the boss"]
+    end
+    QUIZ ~~~ CHAT
+```
+
+A check waits `LADDER_STEP_DAYS` (1 day) per step. The call goes out only if calls are on, the
+person has a number and agreed to calls, and the calling window is open; a machine or no answer
+tells the issuer. A question stays open until the issuer or the assistant, quoting the spec,
+answers it. Until then it climbs one level per `CHAT_SLA_DAYS` (2 days) up to the boss; a support
+ticket starts at the support desk and uses `SUPPORT_SLA_DAYS` (1 day).
+
 ### Data separation, in practice
+
+```mermaid
+flowchart LR
+    CTRL["_control.db<br/>accounts, sessions, task events, task routes<br/>check levels, the model's record, run ledger"]
+    CTRL -->|"routes a task to the department<br/>it was first seen in"| D["one file per department<br/>field-ops.db, engineering.db, management.db ...<br/>follow-ups, note readings, history, quizzes,<br/>answers, grades, reviews, chat, call results<br/>(each file checks its application id, name<br/>and migration ledger when it is opened)"]
+```
 
 - **Departments are files.** `out/state/<department>.db` holds that department's follow-ups, quizzes, answers and chat. `_control.db` holds what belongs to a person or a run: routes, results, accounts, sessions, the run ledger.
 - **A task keeps the department it was first seen in.** A person who moves does not drag their sent records into a file that has never heard of them.
@@ -768,6 +832,7 @@ src/followup/
     ├── spec_terms.py, brief.py          # what a spec says, laid out for the reader
     ├── quiz.py, grading.py, trace.py    # the check, its grading, the code check
     ├── check.py, pins.py, calibrate.py  # the model's record, kept answers, kappa
+    ├── stub_answers.py                  # what the offline stub answers the team layer
     ├── notices.py, completion.py        # messages with stable ids, the check per task
     ├── chat.py, assistant.py, calls.py  # threads, quote-or-abstain, phone calls
     ├── runner.py, ledger.py             # the team pass and its replay ledger
