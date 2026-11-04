@@ -137,6 +137,39 @@ _DEPARTMENT_INDEXES = Step(
 )
 DEPARTMENT_STEPS: tuple[Step, ...] = (_DEPARTMENT_TABLES, _DEPARTMENT_INDEXES)
 
+_CONTROL_ACCOUNTS = Step(
+    "002-accounts-and-tasks",
+    """
+    CREATE TABLE accounts (
+        person_id    TEXT PRIMARY KEY,
+        salt         TEXT NOT NULL,
+        hash         TEXT NOT NULL,
+        created_on   TEXT NOT NULL,
+        failed       INTEGER NOT NULL DEFAULT 0,
+        locked_until TEXT
+    );
+    CREATE TABLE sessions (
+        token_hash TEXT PRIMARY KEY,
+        person_id  TEXT NOT NULL,
+        expires_at TEXT NOT NULL
+    );
+    CREATE TABLE authored_tasks (
+        task_id    TEXT PRIMARY KEY,
+        author_id  TEXT NOT NULL,
+        record     TEXT NOT NULL,
+        created_on TEXT NOT NULL
+    );
+    CREATE TABLE task_events (
+        seq       INTEGER PRIMARY KEY AUTOINCREMENT,
+        task_id   TEXT NOT NULL,
+        kind      TEXT NOT NULL CHECK (kind IN ('accepted', 'submitted', 'returned')),
+        person_id TEXT NOT NULL,
+        day       TEXT NOT NULL,
+        note      TEXT NOT NULL DEFAULT ''
+    );
+    """,
+)
+
 CONTROL_STEPS: tuple[Step, ...] = (
     Step(
         "001-tables",
@@ -169,6 +202,7 @@ CONTROL_STEPS: tuple[Step, ...] = (
         );
         """,
     ),
+    _CONTROL_ACCOUNTS,
 )
 
 

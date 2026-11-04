@@ -22,6 +22,7 @@ from .extras import TaskExtras, load_extras
 from .org import Org, Person, Role
 from .schema import CONTROL
 from .settings import TeamSettings
+from .tasks import effective_records
 from .vault import Vault
 
 
@@ -92,8 +93,9 @@ def load_context(settings: Settings) -> Context:
         raise ConfigError(f"cannot read tasks file {settings.tasks_file}: {exc}") from exc
     if not isinstance(records, list):
         raise ConfigError(f"tasks file {settings.tasks_file} must contain a JSON array")
-    tasks, _ = normalise_all(records)
     vault = Vault(settings.out_dir / "state", team.org, team.trust_visibility)
+    records = effective_records(vault, records)
+    tasks, _ = normalise_all(records)
     return Context(settings, team, vault, records, tasks, load_extras(records, team.org))
 
 

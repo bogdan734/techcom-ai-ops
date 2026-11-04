@@ -11,13 +11,15 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any
 
-from followup.models import Task
+from followup.models import Status, Task
 
+from . import tasks as tasks_module
+from .brief import structure
 from .chat import ASSISTANT, is_closed, members_of, posts_of, waiting_question
 from .context import Context, read_all
 from .grading import Grade, quiz_verdict
 from .notices import issuer_of
-from .org import Capability, Person
+from .org import Capability, Person, Role
 from .pins import pinned
 from .quiz import Quiz, open_quiz
 from .schema import CONTROL
@@ -49,6 +51,12 @@ class CheckView:
     missing: tuple[str, ...] = ()
     can_answer: bool = False
     can_review: bool = False
+    assignee_id: str = ""
+    spec: str = ""
+    brief: dict[str, Any] | None = None
+    can_accept: bool = False
+    can_submit: bool = False
+    can_return: bool = False
 
 
 @dataclass(frozen=True)
@@ -110,6 +118,7 @@ class Dashboard:
     trust: tuple[TrustView, ...] | None
     models: tuple[ModelView, ...] | None
     notices: tuple[NoticeView, ...]
+    assignable: tuple[dict[str, str], ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -119,12 +128,13 @@ def build_dashboard(ctx: Context, viewer: Person) -> Dashboard:
     org = ctx.org
     issuer_capable = org.can(viewer.id, Capability.ISSUE_TASKS)
     line = org.below(viewer.id)
+    moves = tasks_module.events(ctx.vault)
     mine: list[CheckView] = []
     issued: list[CheckView] = []
     for task in sorted(ctx.tasks, key=lambda t: t.task_id):
         owner = org.by_name(task.owner)
         issuer = issuer_of(task, ctx.extras.get(task.task_id), org)
-        view = _check_view(ctx, viewer, task, owner, issuer)
+        view = _check_view(ctx, viewer, task, owner, issuer, moves)
         if owner is not None and owner.id == viewer.id:
             mine.append(view)
         in_line = issuer_capable and (
@@ -147,6 +157,7 @@ def build_dashboard(ctx: Context, viewer: Person) -> Dashboard:
         trust=_trust(ctx, viewer),
         models=_models(ctx, viewer),
         notices=tuple(_notices(ctx, viewer)),
+        assignable=tuple(_assignable(ctx, viewer)),
     )
 
 
@@ -200,9 +211,33 @@ def _line(check: CheckView) -> str:
 # -- builders ------------------------------------------------------------------------------
 
 
+def _assignable(ctx: Context, viewer: Person) -> list[dict[str, str]]:
+    """Whom an issuer may give a task to: people in their line who can act."""
+    if not ctx.org.can(viewer.id, Capability.ISSUE_TASKS):
+        return []
+    people = (ctx.org.person(pid) for pid in sorted(ctx.org.below(viewer.id)))
+    return [
+        {"id": p.id, "name": p.name, "role": p.role.value, "department": p.department}
+        for p in people
+        if p.role not in (Role.PROJECT_MANAGER, Role.WAREHOUSE, Role.SUPPORT)
+    ]
+
+
 def _check_view(
-    ctx: Context, viewer: Person, task: Task, owner: Person | None, issuer: Person | None
+    ctx: Context,
+    viewer: Person,
+    task: Task,
+    owner: Person | None,
+    issuer: Person | None,
+    moves: list[tasks_module.TaskEvent],
 ) -> CheckView:
+    own = owner is not None and owner.id == viewer.id
+    is_issuer = issuer is not None and issuer.id == viewer.id
+    in_line = is_issuer or (owner is not None and owner.id in ctx.org.below(viewer.id))
+    extra = ctx.extras.get(task.task_id)
+    last = tasks_module.last_event(moves, task.task_id)
+    done = task.status is Status.DONE
+    shown = bool(extra and extra.spec and (own or in_line))
     base = {
         "task_id": task.task_id,
         "title": task.title,
@@ -211,6 +246,15 @@ def _check_view(
         "task_status": task.status.value,
         "assignee": owner.name if owner else "unassigned",
         "issuer": issuer.name if issuer else "",
+        "assignee_id": owner.id if owner else "",
+        "spec": extra.spec if shown and extra else "",
+        "brief": structure(extra.spec).to_dict() if shown and extra else None,
+        "can_accept": own
+        and not done
+        and (last is None or last.kind != "accepted")
+        and task.status in (Status.NOT_STARTED, Status.BLOCKED, Status.UNKNOWN),
+        "can_submit": own and not done,
+        "can_return": is_issuer and done,
     }
     db = ctx.open(ctx.department(task))
     quiz = open_quiz(db, task.task_id, owner.id) if db is not None and owner else None
@@ -221,7 +265,6 @@ def _check_view(
         read_all(db, "SELECT question_id, answer FROM answers WHERE quiz_id = ?", (quiz.quiz_id,))
     )
     status = _status(ctx, db, quiz, answers)
-    own = owner is not None and owner.id == viewer.id
     may_see_answers = own or issuer is not None or ctx.org.can(viewer.id, Capability.ISSUE_TASKS)
     questions = tuple(
         QuestionView(
@@ -234,9 +277,6 @@ def _check_view(
         for n, q in enumerate(quiz.questions, start=1)
     )
     traced = (pinned(db, "trace", quiz.quiz_id) or {}).get("results", [])
-    in_line = viewer.id == (issuer.id if issuer else None) or (
-        owner is not None and owner.id in ctx.org.below(viewer.id)
-    )
     return CheckView(
         status=status,
         quiz_id=quiz.quiz_id,

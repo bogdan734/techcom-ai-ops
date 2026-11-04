@@ -8,12 +8,19 @@ by the next run, under the run lock. The console and the app call the same funct
 from __future__ import annotations
 
 import hashlib
+import json
 from collections.abc import Mapping
+from datetime import date
 
 from followup.guard import screen_text
+from followup.llm import LLMGateway
+from followup.models import Status
 
+from . import tasks as tasks_module
 from .access import CHAT_TABLES
-from .chat import close_thread, open_thread, post
+from .assistant import Assistant
+from .chat import ASSISTANT, close_thread, open_thread, pending_questions, post
+from .check import ModelAudit
 from .context import ActionError, Context, read_all
 from .dashboard import _status
 from .notices import issuer_of
@@ -194,6 +201,132 @@ def reply(ctx: Context, viewer: Person, thread_id: str, text: str) -> None:
                 db.close()
             return
     raise ActionError(f"no thread {thread_id}")
+
+
+def create_task(
+    ctx: Context,
+    viewer: Person,
+    *,
+    title: str,
+    assignee_id: str,
+    spec: str,
+    project: str = "General",
+    due: str = "",
+) -> str:
+    """An issuer gives a task to someone in their line; the next run tells the assignee."""
+    if not ctx.org.can(viewer.id, Capability.ISSUE_TASKS):
+        raise ActionError(f"{viewer.id} may not give tasks")
+    assignee = ctx.org.find(assignee_id)
+    if assignee is None or assignee.id not in ctx.org.below(viewer.id):
+        raise ActionError("choose someone from your own line")
+    if assignee.role in (Role.PROJECT_MANAGER, Role.WAREHOUSE, Role.SUPPORT):
+        raise ActionError(f"{assignee.name} does not take tasks")
+    title, spec, project = _text(title, 200), _text(spec, 4000), _text(project, 100) or "General"
+    if not title or len(spec) < 10:
+        raise ActionError("a task needs a title and a spec of at least a sentence")
+    if due:
+        try:
+            date.fromisoformat(due)
+        except ValueError as exc:
+            raise ActionError("the due date is YYYY-MM-DD") from exc
+    db = ctx.vault.open(CONTROL)
+    try:
+        task_id = tasks_module.next_task_id(db)
+        record = {
+            "task_id": task_id,
+            "project": project,
+            "task": title,
+            "assigned_to": assignee.name,
+            "due_date": due or None,
+            "status": "Not Started",
+            "last_update": ctx.today.isoformat(),
+            "notes": "",
+            "spec": spec,
+            "assigned_by": viewer.name,
+            "created": ctx.today.isoformat(),
+        }
+        db.execute(
+            "INSERT INTO authored_tasks (task_id, author_id, record, created_on) "
+            "VALUES (?, ?, ?, ?)",
+            (task_id, viewer.id, json.dumps(record), ctx.today.isoformat()),
+        )
+    finally:
+        db.close()
+    return task_id
+
+
+def accept_task(ctx: Context, viewer: Person, task_id: str) -> None:
+    task, owner = _own_task(ctx, viewer, task_id, "accept")
+    if task.status not in (Status.NOT_STARTED, Status.BLOCKED, Status.UNKNOWN):
+        raise ActionError("this task is already under way")
+    _move(ctx, task.task_id, "accepted", viewer, "")
+
+
+def submit_task(ctx: Context, viewer: Person, task_id: str, note: str = "") -> None:
+    """Hand the work in: the task closes, the issuer hears at once, the check follows."""
+    task, _ = _own_task(ctx, viewer, task_id, "hand in")
+    _move(ctx, task.task_id, "submitted", viewer, _text(note, 500))
+
+
+def return_task(ctx: Context, viewer: Person, task_id: str, note: str) -> None:
+    """The issuer sends finished work back with a reason; the assignee gets it in the thread."""
+    task = ctx.task(task_id)
+    issuer = issuer_of(task, ctx.extras.get(task.task_id), ctx.org)
+    if issuer is None or issuer.id != viewer.id:
+        raise ActionError("only the person who issued the task can send it back")
+    if task.status is not Status.DONE:
+        raise ActionError("only a finished task can be sent back")
+    reason = _text(note, 500)
+    if len(reason) < 3:
+        raise ActionError("say what has to change")
+    _move(ctx, task.task_id, "returned", viewer, reason)
+    say(ctx, viewer, task.task_id, f"Sent back for rework: {reason}")
+
+
+def assist_now(ctx: Context, thread_id: str, gateway: LLMGateway) -> None:
+    """Answer the open question in a thread from the spec now, not at the next run."""
+    for name in ctx.vault.departments():
+        probe = ctx.open(name)
+        if probe is None or not read_all(
+            probe, "SELECT 1 FROM threads WHERE thread_id = ?", (thread_id,)
+        ):
+            continue
+        control = ctx.vault.open(CONTROL)
+        try:
+            audit = ModelAudit(Ledger(control, "model_events"), gateway.model, ctx.team, ctx.today)
+            helper = Assistant(gateway, probe, audit)
+            for waiting in pending_questions(probe):
+                if waiting.thread_id == thread_id and waiting.kind == "task":
+                    extra = ctx.extras.get(waiting.task_id)
+                    reply = helper.answer(
+                        waiting.task_id, extra.spec if extra else "", waiting.question
+                    )
+                    quote = " | ".join(reply.quotes) if reply.quotes else None
+                    post(probe, thread_id, ASSISTANT, reply.text(), ctx.today, quote)
+        finally:
+            control.close()
+        return
+
+
+def _own_task(ctx: Context, viewer: Person, task_id: str, verb: str):
+    task = ctx.task(task_id)
+    owner = ctx.org.by_name(task.owner)
+    if owner is None or owner.id != viewer.id:
+        raise ActionError(f"only the assignee can {verb} a task")
+    if task.status is Status.DONE:
+        raise ActionError("this task is already finished")
+    return task, owner
+
+
+def _move(ctx: Context, task_id: str, kind: str, viewer: Person, note: str) -> None:
+    db = ctx.vault.open(CONTROL)
+    try:
+        db.execute(
+            "INSERT INTO task_events (task_id, kind, person_id, day, note) VALUES (?, ?, ?, ?, ?)",
+            (task_id, kind, viewer.id, ctx.today.isoformat(), note),
+        )
+    finally:
+        db.close()
 
 
 def finish(ctx: Context, viewer: Person, thread_id: str) -> None:

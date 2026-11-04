@@ -35,6 +35,7 @@ class Channel(StrEnum):
 class Kind(StrEnum):
     NEW_TASK = "new_task"
     SPEC_CHANGED = "spec_changed"
+    TASK_STARTED = "task_started"
     TASK_CLOSED = "task_closed"
     NEXT_TASK = "next_task"
     QUIZ = "quiz"
@@ -57,6 +58,7 @@ _TEMPLATES: Mapping[Kind, str] = {
     Kind.SPEC_CHANGED: (
         "The spec of {task_id} ({title}) changed.\nAdded: {added}\nRemoved: {removed}"
     ),
+    Kind.TASK_STARTED: "{assignee} started {task_id} ({title}).",
     Kind.TASK_CLOSED: "{assignee} closed {task_id} ({title}).{check}",
     Kind.NEXT_TASK: "{task_id} is closed. {next}",
     Kind.QUIZ: (
@@ -269,6 +271,17 @@ def lifecycle_notices(
                         facts,
                     )
                 )
+
+    started = [
+        r
+        for r in statuses
+        if r.value == Status.IN_PROGRESS.value and not r.on_activation and r is not first_status
+    ]
+    if started and task.status is Status.IN_PROGRESS and issuer is not None:
+        facts = {**base, "assignee": owner.name}
+        messages.append(
+            Message(Kind.TASK_STARTED, task.task_id, issuer.id, Channel.MESSAGE, "started", facts)
+        )
 
     closed = [r for r in statuses if r.value == Status.DONE.value and not r.on_activation]
     if closed and task.status is Status.DONE:

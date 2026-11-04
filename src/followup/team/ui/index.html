@@ -1,0 +1,463 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Follow-up Desk</title>
+<style>
+/* Liquid Glass tokens, carried over from the Nexus design system: deep base, indigo to violet
+   brand, glass layers, aurora light. Dark by default, light on request or by system setting. */
+:root {
+  --void: #06070d; --abyss: #0b0d16; --surface: #11141f;
+  --p400: #818cf8; --p500: #6366f1; --p600: #7c3aed; --aurora: #22d3ee; --ember: #f472b6;
+  --ok: #34d399; --warn: #fbbf24; --bad: #fb7185;
+  --ink: #eef0fa; --dim: #9aa3bc; --faint: #5d6478;
+  --glass: linear-gradient(135deg, rgba(255,255,255,.07), rgba(255,255,255,.025) 40%, rgba(255,255,255,.045));
+  --edge: rgba(255,255,255,.1); --edge2: rgba(255,255,255,.22);
+  --inner: inset 0 1px 0 rgba(255,255,255,.09), inset 0 -1px 0 rgba(0,0,0,.25);
+  --shadow: 0 12px 40px -12px rgba(0,0,0,.65);
+  --field: rgba(255,255,255,.05); --hover: rgba(255,255,255,.06);
+  --blob1: rgba(99,102,241,.2); --blob2: rgba(34,211,238,.12); --blob3: rgba(124,58,237,.18);
+  --font: "Geist", "SF Pro Display", "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --ease: cubic-bezier(.22,1,.36,1); --spring: cubic-bezier(.34,1.56,.64,1);
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --void: #f2f3fb; --abyss: #ffffff; --surface: #ffffff;
+    --ink: #151a2d; --dim: #4b5472; --faint: #8a92ad;
+    --glass: linear-gradient(135deg, rgba(255,255,255,.92), rgba(255,255,255,.72));
+    --edge: rgba(30,35,90,.1); --edge2: rgba(30,35,90,.22);
+    --inner: inset 0 1px 0 rgba(255,255,255,.95); --shadow: 0 10px 30px -14px rgba(40,50,120,.35);
+    --field: rgba(30,35,90,.045); --hover: rgba(30,35,90,.05);
+    --blob1: rgba(99,102,241,.14); --blob2: rgba(34,211,238,.1); --blob3: rgba(124,58,237,.1);
+    --ok: #059669; --warn: #b45309; --bad: #e11d48; color-scheme: light;
+  }
+}
+:root[data-theme="light"] {
+  --void: #f2f3fb; --abyss: #ffffff; --surface: #ffffff;
+  --ink: #151a2d; --dim: #4b5472; --faint: #8a92ad;
+  --glass: linear-gradient(135deg, rgba(255,255,255,.92), rgba(255,255,255,.72));
+  --edge: rgba(30,35,90,.1); --edge2: rgba(30,35,90,.22);
+  --inner: inset 0 1px 0 rgba(255,255,255,.95); --shadow: 0 10px 30px -14px rgba(40,50,120,.35);
+  --field: rgba(30,35,90,.045); --hover: rgba(30,35,90,.05);
+  --blob1: rgba(99,102,241,.14); --blob2: rgba(34,211,238,.1); --blob3: rgba(124,58,237,.1);
+  --ok: #059669; --warn: #b45309; --bad: #e11d48; color-scheme: light;
+}
+* { box-sizing: border-box; }
+html { background: var(--void); color: var(--ink); font-family: var(--font); -webkit-font-smoothing: antialiased; }
+body { margin: 0; min-height: 100vh; font-size: 15px; line-height: 1.5; }
+button, input, select, textarea { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--p400); outline-offset: 2px; border-radius: 6px; }
+.aurora { position: fixed; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; }
+.aurora i { position: absolute; width: 70vmax; height: 70vmax; border-radius: 50%; filter: blur(90px); opacity: .9; animation: drift 26s var(--ease) infinite alternate; }
+.aurora i:nth-child(1) { background: var(--blob1); left: -20vmax; top: -30vmax; }
+.aurora i:nth-child(2) { background: var(--blob2); right: -25vmax; top: -10vmax; animation-delay: -9s; }
+.aurora i:nth-child(3) { background: var(--blob3); left: 20vmax; bottom: -45vmax; animation-delay: -17s; }
+@keyframes drift { from { transform: translate3d(-4%, -3%, 0) rotate(0); } to { transform: translate3d(5%, 4%, 0) rotate(30deg); } }
+.glass { background: var(--glass); border: 1px solid var(--edge); border-radius: 1.25rem; box-shadow: var(--inner), var(--shadow);
+  backdrop-filter: blur(20px) saturate(1.4); -webkit-backdrop-filter: blur(20px) saturate(1.4); }
+.app { max-width: 1240px; margin: 0 auto; padding: 16px; display: grid; gap: 16px; }
+.topbar { display: flex; flex-wrap: wrap; align-items: center; gap: 14px 20px; padding: 12px 18px; position: sticky; top: 12px; z-index: 5; }
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 650; letter-spacing: -.01em; font-size: 17px; }
+.logo { width: 34px; height: 34px; border-radius: 11px; background: linear-gradient(135deg, var(--p500), var(--p600)); display: grid; place-items: center; color: #fff; box-shadow: 0 8px 24px -8px rgba(99,102,241,.8); }
+.brand small { display: block; font-weight: 400; color: var(--dim); font-size: 12px; letter-spacing: 0; }
+.days { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 240px; overflow-x: auto; padding: 2px; }
+.day { display: grid; gap: 1px; padding: 6px 12px; border-radius: 12px; border: 1px solid transparent; color: var(--dim); font-size: 12px; white-space: nowrap; background: transparent; text-align: left; }
+.day b { color: var(--ink); font-size: 13px; font-weight: 600; }
+.day.done { background: var(--field); }
+.day.done b::before { content: "✓ "; color: var(--ok); }
+.day.next { border-color: var(--p500); background: rgba(99,102,241,.12); }
+.tools { display: flex; gap: 8px; align-items: center; }
+.btn { border: 1px solid var(--edge); background: var(--field); border-radius: 12px; padding: 8px 14px; cursor: pointer; font-weight: 550; transition: transform .25s var(--spring), box-shadow .3s var(--ease), background .2s; }
+.btn:hover { background: var(--hover); border-color: var(--edge2); }
+.btn:active { transform: scale(.97); }
+.btn[disabled] { opacity: .5; pointer-events: none; }
+.btn.primary { color: #fff; border-color: transparent; background: linear-gradient(135deg, var(--p500), var(--p600)); box-shadow: 0 8px 30px -8px rgba(99,102,241,.65); }
+.btn.primary:hover { box-shadow: 0 10px 40px -6px rgba(99,102,241,.9); filter: brightness(1.08); }
+.btn.good { color: var(--ok); } .btn.bad { color: var(--bad); }
+.btn.small { padding: 5px 10px; font-size: 13px; border-radius: 10px; }
+.layout { display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 16px; align-items: start; }
+.side { padding: 14px; position: sticky; top: 92px; max-height: calc(100vh - 110px); overflow: auto; }
+.side h3 { margin: 4px 6px 6px; font-size: 11px; text-transform: uppercase; letter-spacing: .09em; color: var(--faint); }
+.side p.hint { margin: 0 6px 10px; font-size: 12px; color: var(--dim); }
+.person { display: flex; align-items: center; gap: 10px; width: 100%; padding: 7px 8px; border-radius: 12px; border: 1px solid transparent; background: transparent; text-align: left; cursor: pointer; }
+.person:hover { background: var(--hover); }
+.person.on { background: rgba(99,102,241,.16); border-color: rgba(129,140,248,.45); }
+.person span { display: grid; line-height: 1.2; } .person small { color: var(--dim); font-size: 12px; }
+.avatar { width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; font-weight: 700; color: #fff; flex: none; }
+.avatar.big { width: 52px; height: 52px; font-size: 18px; }
+.main { display: grid; gap: 14px; min-width: 0; }
+.tabs { display: flex; gap: 4px; padding: 5px; overflow-x: auto; border-radius: 16px; }
+.tab { border: 0; background: transparent; padding: 8px 16px; border-radius: 12px; color: var(--dim); font-weight: 550; cursor: pointer; white-space: nowrap; position: relative; }
+.tab:hover { color: var(--ink); }
+.tab.on { color: #fff; background: linear-gradient(135deg, var(--p500), var(--p600)); box-shadow: 0 6px 20px -8px rgba(99,102,241,.7); }
+.tab .dot { position: absolute; top: 5px; right: 6px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: var(--ember); color: #fff; font-size: 10px; display: grid; place-items: center; }
+.panel { padding: 20px; min-width: 0; }
+.panel h2 { margin: 0 0 4px; font-size: 20px; letter-spacing: -.015em; }
+.panel h3 { margin: 18px 0 8px; font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--dim); }
+.sub { color: var(--dim); margin: 0 0 14px; }
+.hero { display: flex; gap: 16px; align-items: center; margin-bottom: 8px; }
+.hero h2 { font-size: 24px; }
+.banner { display: flex; gap: 12px; align-items: flex-start; padding: 12px 16px; border-radius: 14px; background: linear-gradient(135deg, rgba(99,102,241,.16), rgba(34,211,238,.08)); border: 1px solid rgba(129,140,248,.3); color: var(--ink); }
+.banner b { color: var(--p400); }
+.cards { display: grid; gap: 10px; }
+.card { display: flex; gap: 14px; align-items: center; padding: 14px 16px; border-radius: 14px; background: var(--field); border: 1px solid var(--edge); cursor: pointer; transition: transform .3s var(--spring), border-color .25s; text-align: left; width: 100%; }
+.card:hover { transform: translateY(-2px); border-color: var(--edge2); }
+.card .ico { width: 38px; height: 38px; border-radius: 12px; display: grid; place-items: center; font-size: 18px; flex: none; }
+.card .body { flex: 1; min-width: 0; } .card .body b { display: block; } .card .body small { color: var(--dim); }
+.ico.a { background: rgba(99,102,241,.2); } .ico.r { background: rgba(251,191,36,.18); } .ico.q { background: rgba(34,211,238,.16); } .ico.h { background: rgba(251,113,133,.18); }
+.empty { text-align: center; padding: 34px 12px; color: var(--dim); }
+.empty .big { font-size: 34px; margin-bottom: 6px; }
+.chip { display: inline-flex; align-items: center; gap: 5px; padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; background: var(--field); border: 1px solid var(--edge); color: var(--dim); white-space: nowrap; }
+.chip.ok { color: var(--ok); border-color: rgba(52,211,153,.4); background: rgba(52,211,153,.1); }
+.chip.warn { color: var(--warn); border-color: rgba(251,191,36,.4); background: rgba(251,191,36,.1); }
+.chip.bad { color: var(--bad); border-color: rgba(251,113,133,.4); background: rgba(251,113,133,.1); }
+.chip.info { color: var(--p400); border-color: rgba(129,140,248,.4); background: rgba(99,102,241,.12); }
+.rows { display: grid; gap: 8px; }
+.row { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) auto auto; gap: 12px; align-items: center; padding: 12px 14px; border-radius: 14px; background: var(--field); border: 1px solid var(--edge); cursor: pointer; text-align: left; width: 100%; transition: border-color .25s, transform .3s var(--spring); }
+.row:hover { border-color: var(--edge2); transform: translateY(-1px); }
+.row b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .row small { color: var(--dim); }
+.table { width: 100%; border-collapse: collapse; } .table th { text-align: left; font-size: 12px; color: var(--faint); font-weight: 600; padding: 6px 10px; }
+.table td { padding: 10px; border-top: 1px solid var(--edge); }
+.split { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 14px; min-height: 360px; }
+.threads { display: grid; gap: 6px; align-content: start; }
+.thread { padding: 10px 12px; border-radius: 12px; border: 1px solid transparent; background: var(--field); cursor: pointer; text-align: left; }
+.thread.on { border-color: rgba(129,140,248,.5); background: rgba(99,102,241,.14); }
+.thread small { display: block; color: var(--dim); }
+.convo { display: grid; grid-template-rows: 1fr auto; gap: 10px; min-width: 0; }
+.bubbles { display: grid; gap: 10px; align-content: start; max-height: 52vh; overflow: auto; padding-right: 4px; }
+.bubble { max-width: 82%; padding: 10px 14px; border-radius: 16px 16px 16px 4px; background: var(--field); border: 1px solid var(--edge); }
+.bubble.mine { justify-self: end; border-radius: 16px 16px 4px 16px; background: linear-gradient(135deg, rgba(99,102,241,.35), rgba(124,58,237,.3)); border-color: rgba(129,140,248,.4); }
+.bubble.bot { border-color: rgba(34,211,238,.4); background: rgba(34,211,238,.08); }
+.bubble small { display: block; color: var(--dim); font-size: 12px; margin-bottom: 2px; }
+.bubble blockquote { margin: 4px 0 0; padding-left: 10px; border-left: 3px solid var(--aurora); }
+.compose { display: flex; gap: 8px; }
+input, select, textarea { width: 100%; padding: 10px 12px; border-radius: 12px; background: var(--field); border: 1px solid var(--edge); }
+textarea { resize: vertical; min-height: 64px; }
+label { display: grid; gap: 6px; font-size: 13px; color: var(--dim); font-weight: 550; }
+.drawer-bg { position: fixed; inset: 0; background: rgba(3,4,10,.5); backdrop-filter: blur(3px); z-index: 20; display: none; }
+.drawer-bg.on { display: block; }
+.drawer { position: fixed; top: 12px; right: 12px; bottom: 12px; width: min(560px, calc(100vw - 24px)); z-index: 21; padding: 22px; overflow: auto; transform: translateX(110%); transition: transform .45s var(--ease); border-radius: 1.75rem; background: var(--surface); }
+.drawer.on { transform: none; }
+.drawer .x { position: absolute; top: 14px; right: 14px; }
+.q { padding: 12px 14px; border-radius: 14px; background: var(--field); border: 1px solid var(--edge); display: grid; gap: 8px; margin-bottom: 10px; }
+.q .num { color: var(--p400); font-weight: 700; margin-right: 6px; }
+.answer { padding: 8px 12px; border-radius: 10px; background: rgba(52,211,153,.08); border-left: 3px solid var(--ok); }
+.warnbox { padding: 10px 14px; border-radius: 12px; background: rgba(251,191,36,.1); border: 1px solid rgba(251,191,36,.4); }
+.flow { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; counter-reset: s; }
+.flow div { padding: 14px; border-radius: 14px; background: var(--field); border: 1px solid var(--edge); position: relative; }
+.flow div::before { counter-increment: s; content: counter(s); position: absolute; top: -10px; left: 12px; width: 22px; height: 22px; border-radius: 50%; background: linear-gradient(135deg, var(--p500), var(--p600)); color: #fff; font-size: 12px; font-weight: 700; display: grid; place-items: center; }
+.guide { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; }
+.guide article { padding: 14px; border-radius: 14px; background: var(--field); border: 1px solid var(--edge); } .guide h4 { margin: 0 0 4px; }
+.guide p { margin: 0; color: var(--dim); font-size: 14px; }
+.bar { height: 8px; border-radius: 4px; background: var(--field); overflow: hidden; } .bar i { display: block; height: 100%; background: linear-gradient(90deg, var(--p500), var(--aurora)); }
+.toasts { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); display: grid; gap: 8px; z-index: 40; }
+.toast { padding: 10px 18px; border-radius: 14px; background: var(--surface); border: 1px solid var(--edge2); box-shadow: var(--shadow); animation: pop .4s var(--spring); }
+.toast.bad { border-color: rgba(251,113,133,.6); } .toast.ok { border-color: rgba(52,211,153,.6); }
+@keyframes pop { from { opacity: 0; transform: translateY(12px) scale(.96); } }
+.spin { display: inline-block; width: 14px; height: 14px; border: 2px solid rgba(255,255,255,.4); border-top-color: #fff; border-radius: 50%; animation: turn .7s linear infinite; vertical-align: -2px; margin-right: 6px; }
+@keyframes turn { to { transform: rotate(360deg); } }
+@media (max-width: 900px) {
+  .layout { grid-template-columns: 1fr; } .side { position: static; max-height: none; }
+  .side .list { display: flex; gap: 6px; overflow-x: auto; } .person { width: auto; flex: none; } .side h3, .side p.hint { display: none; }
+  .split { grid-template-columns: 1fr; } .flow { grid-template-columns: 1fr 1fr; } .row { grid-template-columns: 1fr auto; } .row > :nth-child(2) { display: none; }
+  .topbar { position: static; }
+}
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; } }
+</style>
+</head>
+<body>
+<div class="aurora" aria-hidden="true"><i></i><i></i><i></i></div>
+<div id="app" class="app"></div>
+<div id="bg" class="drawer-bg"></div>
+<aside id="drawer" class="drawer glass" aria-live="polite"></aside>
+<div id="toasts" class="toasts" role="status" aria-live="polite"></div>
+<script>
+"use strict";
+const I18N = {
+  en: {
+    brand: "Follow-up Desk", tag: "Tasks, checks and answers in one place",
+    advance: "Advance to {day}", runNow: "Run now", running: "Running", done: "All days played",
+    pick: "Sign in as", hint: "A demo switcher, not a login. Pick a person to see what they see.",
+    overview: "Overview", tasks: "Tasks", messages: "Messages", notices: "Notices", team: "Team", guide: "Guide",
+    hi: "Hi, {name}", needs: "Needs you", nothing: "Nothing needs you right now.", nothingHint: "Advance the day and watch the layer work.",
+    next: "What happens next", answerCheck: "Answer the completion check", reviewCheck: "The checks disagree: decide",
+    questionWaits: "A question is waiting for you", onHold: "{name} is on hold", open: "Open", clearHold: "Clear hold",
+    mine: "Assigned to me", line: "In my line", project: "Project", due: "Due", status: "Status", check: "Check",
+    noTasks: "No tasks here.", noCheck: "No check", openCheck: "Waiting for answers", answered: "Answered, graded on the next run",
+    needsReview: "Needs a review", pass: "Passed", fail: "Did not pass",
+    questions: "Questions", notScored: "not scored", yourAnswer: "Write it in your own words", send: "Send answers",
+    saved: "Answers saved. Advance the day and they are graded.", answersGiven: "Answers", notFound: "Not found in the code",
+    notFoundHint: "The task names these, and the code check did not find them. This is a question for the engineer, not a verdict.",
+    accept: "Accept", reject: "Reject", note: "Note (optional)", reviewed: "Review saved.",
+    threads: "Conversations", askTask: "Ask about a task", contactSupport: "Contact support", writeMsg: "Write a message", sendMsg: "Send",
+    pickTask: "Task", noThreads: "No conversations yet.", waiting: "Waiting for an answer", assistant: "Assistant · from the task text",
+    sentToYou: "Sent to you", message: "Message", call: "Call", noNotices: "Nothing sent to you yet.",
+    levels: "Check levels in your line", person: "Person", role: "Role", level: "Level", results: "Results",
+    hiddenLevels: "Check levels are hidden in this deployment. They still decide how many questions people get.",
+    noLine: "Nobody reports to you.", models: "Model record", passRate: "pass rate", noModels: "No model results yet.",
+    ethics: "Levels set how much we check. They never feed pay or discipline, and anyone can ask for the record behind theirs.",
+    flow1: "A task closes", flow1d: "The issuer hears at once; the assignee is reminded of the next task.",
+    flow2: "A check is asked", flow2d: "A few questions from the task text. A strict record means more, a clean one fewer.",
+    flow3: "Answers are graded", flow3d: "Key terms decide first, the model is a second opinion, a person settles doubts.",
+    flow4: "The level adapts", flow4d: "Reminders, then a call. The model's own record is checked too.",
+    g1: "Your tasks", g1d: "Tasks assigned to you and, for managers, the tasks in your line.",
+    g2: "Completion checks", g2d: "Questions from the task text, asked once when a task closes. Open one from Tasks.",
+    g3: "Chat and assistant", g3d: "Ask the issuer. The assistant answers from the task text with quotes, or passes it on.",
+    g4: "Support", g4d: "Something broken? Contact support from Messages. It has its own database file.",
+    g5: "Levels", g5d: "Hidden or shown only to issuers. Nobody sees their own, and it never drives pay.",
+    g6: "Calls", g6d: "An unanswered check becomes a reminder, then a phone call, with consent and a calling window.",
+    flowTitle: "How a task is checked", guideTitle: "Where is what", theme: "Theme", lang: "Language",
+    dayRan: "{date} ran: {n} notices, {u} not delivered", failed: "Something went wrong", sent: "Sent", ticket: "Ticket opened",
+  },
+  ru: {
+    brand: "Follow-up Desk", tag: "Задачи, проверки и ответы в одном месте",
+    advance: "К дню: {day}", runNow: "Запустить", running: "Идёт запуск", done: "Все дни пройдены",
+    pick: "Войти как", hint: "Демо-переключатель, а не вход. Выберите человека, чтобы увидеть его глазами.",
+    overview: "Обзор", tasks: "Задачи", messages: "Сообщения", notices: "Уведомления", team: "Команда", guide: "Справка",
+    hi: "Привет, {name}", needs: "Нужно от вас", nothing: "Сейчас от вас ничего не нужно.", nothingHint: "Переведите день вперёд и посмотрите, как всё работает.",
+    next: "Что будет дальше", answerCheck: "Ответьте на проверку выполнения", reviewCheck: "Проверки расходятся: решите",
+    questionWaits: "Вопрос ждёт вашего ответа", onHold: "{name} на паузе", open: "Открыть", clearHold: "Снять паузу",
+    mine: "Назначены мне", line: "В моей линии", project: "Проект", due: "Срок", status: "Статус", check: "Проверка",
+    noTasks: "Задач нет.", noCheck: "Без проверки", openCheck: "Ждёт ответов", answered: "Отвечено, оценка при следующем запуске",
+    needsReview: "Нужно решение", pass: "Пройдена", fail: "Не пройдена",
+    questions: "Вопросы", notScored: "без оценки", yourAnswer: "Своими словами", send: "Отправить ответы",
+    saved: "Ответы сохранены. Переведите день вперёд, и их оценят.", answersGiven: "Ответы", notFound: "Не найдено в коде",
+    notFoundHint: "Эти имена названы в ТЗ, а проверка кода их не нашла. Это вопрос к инженеру, а не приговор.",
+    accept: "Принять", reject: "Отклонить", note: "Заметка (по желанию)", reviewed: "Решение сохранено.",
+    threads: "Беседы", askTask: "Спросить по задаче", contactSupport: "Написать в поддержку", writeMsg: "Напишите сообщение", sendMsg: "Отправить",
+    pickTask: "Задача", noThreads: "Бесед пока нет.", waiting: "Ждёт ответа", assistant: "Помощник · из текста задачи",
+    sentToYou: "Вам отправлено", message: "Сообщение", call: "Звонок", noNotices: "Вам пока ничего не отправляли.",
+    levels: "Уровни проверки в вашей линии", person: "Человек", role: "Роль", level: "Уровень", results: "Результатов",
+    hiddenLevels: "Уровни проверки скрыты. Они всё равно решают, сколько вопросов получает человек.",
+    noLine: "Вам никто не подчиняется.", models: "Работа модели", passRate: "доля верных", noModels: "Результатов модели пока нет.",
+    ethics: "Уровень задаёт объём проверки. Он не влияет на оплату и взыскания, и каждый может запросить запись за своим уровнем.",
+    flow1: "Задача закрыта", flow1d: "Выдавший узнаёт сразу, исполнителю напоминают о следующей.",
+    flow2: "Проверка", flow2d: "Несколько вопросов по тексту задачи. Строгая история даёт больше, чистая меньше.",
+    flow3: "Оценка ответов", flow3d: "Сначала ключевые слова, модель второе мнение, сомнения решает человек.",
+    flow4: "Уровень подстраивается", flow4d: "Напоминание, затем звонок. Работа самой модели тоже проверяется.",
+    g1: "Ваши задачи", g1d: "Назначенные вам задачи, а у руководителей ещё и задачи их линии.",
+    g2: "Проверки выполнения", g2d: "Вопросы по тексту задачи, один раз при закрытии. Откройте из вкладки «Задачи».",
+    g3: "Чат и помощник", g3d: "Спросите выдавшего. Помощник отвечает цитатами из задачи или передаёт вопрос дальше.",
+    g4: "Поддержка", g4d: "Что-то сломалось? Напишите в поддержку из «Сообщений». У неё свой файл БД.",
+    g5: "Уровни", g5d: "Скрыты или видны только выдающим. Свой никто не видит, на оплату он не влияет.",
+    g6: "Звонки", g6d: "Без ответа проверка становится напоминанием, потом звонком, с согласием и окном звонков.",
+    flowTitle: "Как проверяется задача", guideTitle: "Что где находится", theme: "Тема", lang: "Язык",
+    dayRan: "{date}: {n} уведомлений, не доставлено {u}", failed: "Что-то пошло не так", sent: "Отправлено", ticket: "Обращение создано",
+  },
+  uk: {
+    brand: "Follow-up Desk", tag: "Завдання, перевірки та відповіді в одному місці",
+    advance: "До дня: {day}", runNow: "Запустити", running: "Триває запуск", done: "Усі дні пройдено",
+    pick: "Увійти як", hint: "Демо-перемикач, а не вхід. Оберіть людину, щоб побачити її очима.",
+    overview: "Огляд", tasks: "Завдання", messages: "Повідомлення", notices: "Сповіщення", team: "Команда", guide: "Довідка",
+    hi: "Привіт, {name}", needs: "Потрібно від вас", nothing: "Зараз від вас нічого не потрібно.", nothingHint: "Переведіть день уперед і подивіться, як усе працює.",
+    next: "Що буде далі", answerCheck: "Дайте відповідь на перевірку виконання", reviewCheck: "Перевірки розходяться: вирішіть",
+    questionWaits: "Питання чекає вашої відповіді", onHold: "{name} на паузі", open: "Відкрити", clearHold: "Зняти паузу",
+    mine: "Призначені мені", line: "У моїй лінії", project: "Проєкт", due: "Строк", status: "Статус", check: "Перевірка",
+    noTasks: "Завдань немає.", noCheck: "Без перевірки", openCheck: "Чекає відповідей", answered: "Відповіли, оцінка на наступному запуску",
+    needsReview: "Потрібне рішення", pass: "Пройдена", fail: "Не пройдена",
+    questions: "Питання", notScored: "без оцінки", yourAnswer: "Своїми словами", send: "Надіслати відповіді",
+    saved: "Відповіді збережено. Переведіть день уперед, і їх оцінять.", answersGiven: "Відповіді", notFound: "Не знайдено в коді",
+    notFoundHint: "Ці імена названо в ТЗ, а перевірка коду їх не знайшла. Це питання до інженера, а не вирок.",
+    accept: "Прийняти", reject: "Відхилити", note: "Нотатка (за бажанням)", reviewed: "Рішення збережено.",
+    threads: "Розмови", askTask: "Запитати щодо завдання", contactSupport: "Написати в підтримку", writeMsg: "Напишіть повідомлення", sendMsg: "Надіслати",
+    pickTask: "Завдання", noThreads: "Розмов поки немає.", waiting: "Чекає відповіді", assistant: "Помічник · з тексту завдання",
+    sentToYou: "Вам надіслано", message: "Повідомлення", call: "Дзвінок", noNotices: "Вам поки нічого не надсилали.",
+    levels: "Рівні перевірки у вашій лінії", person: "Людина", role: "Роль", level: "Рівень", results: "Результатів",
+    hiddenLevels: "Рівні перевірки приховано. Вони все одно визначають, скільки питань отримує людина.",
+    noLine: "Вам ніхто не підпорядковується.", models: "Робота моделі", passRate: "частка вірних", noModels: "Результатів моделі поки немає.",
+    ethics: "Рівень задає обсяг перевірки. Він не впливає на оплату чи стягнення, і кожен може запросити запис за своїм рівнем.",
+    flow1: "Завдання закрито", flow1d: "Той, хто видав, дізнається одразу, виконавцю нагадують про наступне.",
+    flow2: "Перевірка", flow2d: "Кілька питань за текстом завдання. Сувора історія дає більше, чиста менше.",
+    flow3: "Оцінка відповідей", flow3d: "Спершу ключові слова, модель друга думка, сумніви вирішує людина.",
+    flow4: "Рівень підлаштовується", flow4d: "Нагадування, потім дзвінок. Робота самої моделі теж перевіряється.",
+    g1: "Ваші завдання", g1d: "Призначені вам завдання, а в керівників ще й завдання їхньої лінії.",
+    g2: "Перевірки виконання", g2d: "Питання за текстом завдання, один раз при закритті. Відкрийте з вкладки «Завдання».",
+    g3: "Чат і помічник", g3d: "Запитайте того, хто видав. Помічник відповідає цитатами із завдання або передає питання далі.",
+    g4: "Підтримка", g4d: "Щось зламалося? Напишіть у підтримку з «Повідомлень». Вона має власний файл БД.",
+    g5: "Рівні", g5d: "Приховані або видимі лише тим, хто видає. Свій ніхто не бачить, на оплату він не впливає.",
+    g6: "Дзвінки", g6d: "Без відповіді перевірка стає нагадуванням, потім дзвінком, зі згодою й вікном дзвінків.",
+    flowTitle: "Як перевіряється завдання", guideTitle: "Що де знаходиться", theme: "Тема", lang: "Мова",
+    dayRan: "{date}: {n} сповіщень, не доставлено {u}", failed: "Щось пішло не так", sent: "Надіслано", ticket: "Звернення створено",
+  },
+};
+const S = { lang: "en", theme: "auto", people: [], me: null, board: null, info: null, tab: "overview", thread: null, busy: false };
+try { S.lang = localStorage.getItem("fd.lang") || (navigator.language || "en").slice(0, 2); S.theme = localStorage.getItem("fd.theme") || "auto"; S.me = localStorage.getItem("fd.me"); } catch (e) { /* storage may be blocked */ }
+if (!I18N[S.lang]) S.lang = "en";
+const t = (k, v = {}) => (I18N[S.lang][k] ?? I18N.en[k] ?? k).replace(/\{(\w+)\}/g, (_, n) => v[n] ?? "");
+
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+class Raw { constructor(s) { this.s = s; } }
+const raw = s => new Raw(s);
+const one = v => v instanceof Raw ? v.s : Array.isArray(v) ? v.map(one).join("") : esc(v);
+const html = (strs, ...vals) => new Raw(strs.reduce((o, s, i) => o + s + (i < vals.length ? one(vals[i]) : ""), ""));
+const $ = (s, el = document) => el.querySelector(s);
+
+async function api(path, body) {
+  const opts = body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json", "X-Followup": "1" }, body: JSON.stringify(body) };
+  const res = await fetch(path, opts);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || res.statusText);
+  return data;
+}
+function toast(msg, kind = "") {
+  const el = document.createElement("div"); el.className = "toast " + kind; el.textContent = msg;
+  $("#toasts").append(el); setTimeout(() => el.remove(), 4200);
+}
+const hue = s => [...s].reduce((a, c) => (a * 31 + c.charCodeAt(0)) % 360, 7);
+const avatar = (name, big = false) => html`<span class="avatar ${big ? "big" : ""}" style="background:linear-gradient(135deg,hsl(${hue(name)} 70% 55%),hsl(${(hue(name) + 45) % 360} 70% 42%))">${name.split(/\s+/).map(w => w[0]).slice(0, 2).join("")}</span>`;
+const chip = (kind, text) => html`<span class="chip ${kind}">${text}</span>`;
+const STATUS = { none: ["", "noCheck"], open: ["info", "openCheck"], answered: ["info", "answered"], needs_review: ["warn", "needsReview"], pass: ["ok", "pass"], fail: ["bad", "fail"] };
+const checkChip = c => chip(STATUS[c.status][0], t(STATUS[c.status][1]));
+const LEVEL = { normal: "info", reduced: "ok", tightened: "warn", halted: "bad" };
+
+async function loadInfo() { S.info = await api("/api/state"); }
+async function loadBoard() {
+  if (!S.me) return;
+  try { S.board = await api("/api/me?as=" + encodeURIComponent(S.me)); } catch (e) { toast(e.message, "bad"); }
+}
+async function init() {
+  document.documentElement.dataset.theme = S.theme; document.documentElement.lang = S.lang;
+  await loadInfo(); S.people = await api("/api/people");
+  if (!S.people.some(p => p.id === S.me)) S.me = S.people[0]?.id;
+  await loadBoard(); render();
+}
+
+function needs() {
+  const b = S.board, items = [];
+  b.mine.filter(c => c.can_answer).forEach(c => items.push({ i: "a", title: t("answerCheck"), sub: `${c.task_id} · ${c.title}`, act: "check", arg: c.task_id }));
+  b.issued.filter(c => c.can_review).forEach(c => items.push({ i: "r", title: t("reviewCheck"), sub: `${c.task_id} · ${c.assignee}`, act: "check", arg: c.task_id }));
+  b.threads.forEach(th => { const last = [...th.posts].reverse().find(p => !p.assistant); if (th.waiting && last && !last.mine) items.push({ i: "q", title: t("questionWaits"), sub: `${th.task_id || ""} ${th.subject}`, act: "thread", arg: th.thread_id }); });
+  (b.trust || []).filter(p => p.halted).forEach(p => items.push({ i: "h", title: t("onHold", { name: p.name }), sub: p.role, act: "clear", arg: p.person_id }));
+  return items;
+}
+
+function render() {
+  if (!S.board) return;
+  const b = S.board, info = S.info, scen = info.mode === "scenario";
+  const nextDay = scen ? info.days.find(d => !d.done) : null;
+  const count = needs().length;
+  const tabs = ["overview", "tasks", "messages", "notices", ...(b.trust !== null || b.models !== null ? ["team"] : []), "guide"];
+  if (!tabs.includes(S.tab)) S.tab = "overview";
+  $("#app").innerHTML = html`
+  <header class="topbar glass">
+    <div class="brand"><span class="logo">✓</span><div>${t("brand")}<small>${t("tag")}</small></div></div>
+    <div class="days" aria-label="days">${scen ? info.days.map(d => html`<span class="day ${d.done ? "done" : d === nextDay ? "next" : ""}"><b>${d.label}</b>${d.title}</span>`) : html`<span class="day"><b>${info.today}</b></span>`}</div>
+    <div class="tools">
+      <button class="btn primary" data-act="advance" ${S.busy || (scen && !nextDay) ? "disabled" : ""}>${S.busy ? html`<span class="spin"></span>${t("running")}` : scen ? (nextDay ? t("advance", { day: nextDay.label }) : t("done")) : t("runNow")}</button>
+      <select data-act="lang" aria-label="${t("lang")}" style="width:auto">${["en", "ru", "uk"].map(l => html`<option value="${l}" ${l === S.lang ? "selected" : ""}>${l.toUpperCase()}</option>`)}</select>
+      <button class="btn" data-act="theme" aria-label="${t("theme")}" title="${t("theme")}">${S.theme === "light" ? "☀" : S.theme === "dark" ? "☾" : "◐"}</button>
+    </div>
+  </header>
+  <div class="layout">
+    <aside class="side glass"><h3>${t("pick")}</h3><p class="hint">${t("hint")}</p><div class="list">${S.people.map(p => html`
+      <button class="person ${p.id === S.me ? "on" : ""}" data-act="as" data-arg="${p.id}">${avatar(p.name)}<span><b>${p.name}</b><small>${p.role.replace("_", " ")} · ${p.department}</small></span></button>`)}</div></aside>
+    <main class="main">
+      ${nextDay ? html`<div class="banner"><span>💡</span><div><b>${t("next")}:</b> ${nextDay.note}</div></div>` : ""}
+      <nav class="tabs glass" role="tablist">${tabs.map(k => html`<button class="tab ${S.tab === k ? "on" : ""}" role="tab" data-act="tab" data-arg="${k}">${t(k)}${k === "overview" && count ? html`<span class="dot">${count}</span>` : ""}</button>`)}</nav>
+      <section class="panel glass" id="view">${view()}</section>
+    </main>
+  </div>`.s;
+}
+
+function view() {
+  return { overview, tasks, messages, notices, team, guide }[S.tab]();
+}
+function overview() {
+  const b = S.board, items = needs();
+  return html`<div class="hero">${avatar(b.viewer.name, true)}<div><h2>${t("hi", { name: b.viewer.name.split(" ")[0] })}</h2><p class="sub" style="margin:0">${b.viewer.role.replace("_", " ")} · ${b.viewer.department} · ${b.today}</p></div></div>
+  <h3>${t("needs")}</h3>
+  ${items.length ? html`<div class="cards">${items.map(i => html`<button class="card" data-act="${i.act}" data-arg="${i.arg}"><span class="ico ${i.i}">${{ a: "✍", r: "⚖", q: "💬", h: "⏸" }[i.i]}</span><span class="body"><b>${i.title}</b><small>${i.sub}</small></span>${chip("info", i.act === "clear" ? t("clearHold") : t("open"))}</button>`)}</div>`
+    : html`<div class="empty"><div class="big">🌿</div><b>${t("nothing")}</b><p>${t("nothingHint")}</p></div>`}
+  <h3>${t("notices")}</h3>${noticeList(b.notices.slice(0, 4))}`;
+}
+function taskRows(list) {
+  return list.length ? html`<div class="rows">${list.map(c => html`<button class="row" data-act="check" data-arg="${c.task_id}"><span><b>${c.task_id} · ${c.title}</b><small>${c.assignee}${c.issuer ? " ← " + c.issuer : ""}</small></span><span><small>${c.project}</small><br><small>${t("due")} ${c.due || "–"}</small></span>${chip("", c.task_status)}${checkChip(c)}</button>`)}</div>` : html`<p class="sub">${t("noTasks")}</p>`;
+}
+function tasks() {
+  const b = S.board;
+  return html`<h2>${t("tasks")}</h2><h3>${t("mine")}</h3>${taskRows(b.mine)}${b.issued.length || b.trust !== null ? html`<h3>${t("line")}</h3>${taskRows(b.issued)}` : ""}`;
+}
+function messages() {
+  const b = S.board, list = b.threads;
+  if (!S.thread || !list.some(x => x.thread_id === S.thread)) S.thread = list[0]?.thread_id || null;
+  const th = list.find(x => x.thread_id === S.thread);
+  return html`<h2>${t("messages")}</h2><p class="sub"><button class="btn small" data-act="ask">+ ${t("askTask")}</button> <button class="btn small" data-act="ticket">+ ${t("contactSupport")}</button></p>
+  <div class="split"><div class="threads">${list.length ? list.map(x => html`<button class="thread ${x.thread_id === S.thread ? "on" : ""}" data-act="thread" data-arg="${x.thread_id}"><b>${x.kind === "support" ? "🛟 " : ""}${x.subject}</b><small>${x.task_id}</small>${x.waiting ? chip("warn", t("waiting")) : ""}</button>`) : html`<p class="sub">${t("noThreads")}</p>`}</div>
+  <div class="convo">${th ? html`<div class="bubbles">${th.posts.map(p => html`<div class="bubble ${p.mine ? "mine" : ""} ${p.assistant ? "bot" : ""}"><small>${p.assistant ? "✨ " + t("assistant") : p.author} · ${p.day}</small>${p.quoted ? html`<blockquote>${p.text}</blockquote>` : p.text}</div>`)}</div>
+    <form class="compose" data-form="reply" data-arg="${th.thread_id}"><input name="text" placeholder="${t("writeMsg")}" required autocomplete="off"><button class="btn primary">${t("sendMsg")}</button></form>` : html`<div class="empty"><div class="big">💬</div>${t("noThreads")}</div>`}</div></div>`;
+}
+function noticeList(list) {
+  return list.length ? html`<div class="rows">${list.map(n => html`<div class="row" style="cursor:default;grid-template-columns:auto minmax(0,1fr) auto"><span>${n.channel === "call" ? "📞" : "✉"}</span><span style="white-space:pre-line">${n.body}</span><small>${n.when}</small></div>`)}</div>` : html`<p class="sub">${t("noNotices")}</p>`;
+}
+function notices() { return html`<h2>${t("notices")}</h2><p class="sub">${t("sentToYou")}</p>${noticeList(S.board.notices)}`; }
+function team() {
+  const b = S.board;
+  return html`<h2>${t("team")}</h2><h3>${t("levels")}</h3>
+  ${b.trust === null ? html`<div class="warnbox">${t("hiddenLevels")}</div>` : b.trust.length ? html`<table class="table"><thead><tr><th>${t("person")}</th><th>${t("role")}</th><th>${t("level")}</th><th>${t("results")}</th><th></th></tr></thead><tbody>${b.trust.map(p => html`<tr><td>${avatar(p.name)} ${p.name}</td><td>${p.role.replace("_", " ")}</td><td>${chip(LEVEL[p.level], p.level)}${p.probation ? chip("", "new") : ""}</td><td>${p.results}</td><td>${p.halted ? html`<button class="btn small" data-act="clear" data-arg="${p.person_id}">${t("clearHold")}</button>` : ""}</td></tr>`)}</tbody></table>` : html`<p class="sub">${t("noLine")}</p>`}
+  <h3>${t("models")}</h3>${b.models && b.models.length ? html`<div class="rows">${b.models.map(m => html`<div class="row" style="cursor:default;grid-template-columns:minmax(0,1fr) 160px auto"><span><b>${m.feature}</b><small>${m.model} · ${m.results}</small></span><span><div class="bar"><i style="width:${Math.round((m.pass_rate ?? 0) * 100)}%"></i></div></span>${chip(LEVEL[m.level], m.pass_rate == null ? "–" : Math.round(m.pass_rate * 100) + "% " + t("passRate"))}</div>`)}</div>` : html`<p class="sub">${t("noModels")}</p>`}
+  <p class="sub" style="margin-top:16px">🛡 ${t("ethics")}</p>`;
+}
+function guide() {
+  return html`<h2>${t("guideTitle")}</h2><h3>${t("flowTitle")}</h3>
+  <div class="flow">${[1, 2, 3, 4].map(n => html`<div><b>${t("flow" + n)}</b><p class="sub" style="margin:4px 0 0">${t("flow" + n + "d")}</p></div>`)}</div>
+  <h3>${t("guideTitle")}</h3><div class="guide">${[1, 2, 3, 4, 5, 6].map(n => html`<article><h4>${t("g" + n)}</h4><p>${t("g" + n + "d")}</p></article>`)}</div>`;
+}
+
+function allChecks() { return [...S.board.mine, ...S.board.issued]; }
+function openCheck(taskId) {
+  const c = allChecks().find(x => x.task_id === taskId); if (!c) return;
+  const me = S.board.viewer.id;
+  const qs = c.questions.length ? html`<h3>${t("questions")}</h3>${c.can_answer ? html`<form data-form="answer" data-arg="${c.task_id}">${c.questions.filter(q => q.graded).map(q => html`<div class="q"><div><span class="num">${q.number}</span>${q.prompt}</div><textarea name="q${q.number}" placeholder="${t("yourAnswer")}" required></textarea></div>`)}${c.questions.filter(q => !q.graded).map(q => html`<div class="q"><div><span class="num">${q.number}</span>${q.prompt} ${chip("", t("notScored"))}</div></div>`)}<button class="btn primary">${t("send")}</button></form>`
+    : html`${c.questions.map(q => html`<div class="q"><div><span class="num">${q.number}</span>${q.prompt} ${q.graded ? "" : chip("", t("notScored"))}</div>${q.answer ? html`<div class="answer">${q.answer}</div>` : ""}</div>`)}`}` : "";
+  const missing = c.missing.length ? html`<div class="warnbox"><b>${t("notFound")}:</b> ${c.missing.map(m => html`<code>${m}</code> `)}<p class="sub" style="margin:6px 0 0">${t("notFoundHint")}</p></div>` : "";
+  const review = c.can_review ? html`<h3>${t("reviewCheck")}</h3><form data-form="review" data-arg="${c.task_id}"><label>${t("note")}<input name="note"></label><p><button class="btn good" data-accept="1">${t("accept")}</button> <button class="btn bad" data-accept="0">${t("reject")}</button></p></form>` : "";
+  $("#drawer").innerHTML = html`<button class="btn x small" data-act="close" aria-label="close">✕</button><h2>${c.task_id} · ${c.title}</h2><p class="sub">${c.assignee}${c.issuer ? " ← " + c.issuer : ""} · ${c.project}</p><p>${checkChip(c)} ${chip("", c.task_status)}</p>${missing}${qs}${review}`.s;
+  $("#drawer").classList.add("on"); $("#bg").classList.add("on");
+}
+function closeDrawer() { $("#drawer").classList.remove("on"); $("#bg").classList.remove("on"); }
+
+function modal(title, body, form, arg) {
+  $("#drawer").innerHTML = html`<button class="btn x small" data-act="close" aria-label="close">✕</button><h2>${title}</h2><form data-form="${form}" data-arg="${arg || ""}">${body}<p><button class="btn primary">${t("sendMsg")}</button></p></form>`.s;
+  $("#drawer").classList.add("on"); $("#bg").classList.add("on");
+}
+
+async function act(fn, ok) {
+  try { const r = await fn(); if (ok) toast(ok, "ok"); await loadInfo(); await loadBoard(); closeDrawer(); render(); return r; }
+  catch (e) { toast(e.message || t("failed"), "bad"); }
+}
+
+document.addEventListener("click", async e => {
+  const el = e.target.closest("[data-act],[data-accept],#bg"); if (!el) return;
+  if (el.id === "bg") return closeDrawer();
+  const a = el.dataset.act, arg = el.dataset.arg;
+  if (el.dataset.accept !== undefined) { e.preventDefault(); const form = el.closest("form"); return act(() => api("/api/review", { as: S.me, task: form.dataset.arg, accept: el.dataset.accept === "1", note: form.note.value }), t("reviewed")); }
+  if (a === "as") { S.me = arg; try { localStorage.setItem("fd.me", arg); } catch (x) {} await loadBoard(); S.thread = null; render(); }
+  else if (a === "tab") { S.tab = arg; render(); }
+  else if (a === "theme") { S.theme = { auto: "dark", dark: "light", light: "auto" }[S.theme]; document.documentElement.dataset.theme = S.theme; try { localStorage.setItem("fd.theme", S.theme); } catch (x) {} render(); }
+  else if (a === "check") openCheck(arg);
+  else if (a === "thread") { S.tab = "messages"; S.thread = arg; render(); }
+  else if (a === "close") closeDrawer();
+  else if (a === "clear") act(() => api("/api/clear", { as: S.me, person: arg }), "✓");
+  else if (a === "advance") { S.busy = true; render(); try { const r = await api("/api/advance", {}); toast(t("dayRan", { date: r.date, n: r.notices, u: r.undelivered }), "ok"); } catch (x) { toast(x.message, "bad"); } S.busy = false; await loadInfo(); await loadBoard(); render(); }
+  else if (a === "ask") {
+    const mine = [...S.board.mine, ...S.board.issued.filter(c => c.issuer === S.board.viewer.name)].filter((c, i, l) => l.findIndex(x => x.task_id === c.task_id) === i);
+    modal(t("askTask"), html`<label>${t("pickTask")}<select name="task">${mine.map(c => html`<option value="${c.task_id}">${c.task_id} · ${c.title}</option>`)}</select></label><label>${t("writeMsg")}<textarea name="text" required></textarea></label>`, "ask");
+  }
+  else if (a === "ticket") modal(t("contactSupport"), html`<label>${t("writeMsg")}<textarea name="text" required></textarea></label>`, "ticket");
+});
+document.addEventListener("change", e => { if (e.target.dataset.act === "lang") { S.lang = e.target.value; document.documentElement.lang = S.lang; try { localStorage.setItem("fd.lang", S.lang); } catch (x) {} render(); } });
+document.addEventListener("submit", e => {
+  const form = e.target.closest("form[data-form]"); if (!form) return; e.preventDefault();
+  const kind = form.dataset.form, arg = form.dataset.arg, text = form.text?.value;
+  if (kind === "answer") { const answers = {}; [...form.elements].filter(x => /^q\d+$/.test(x.name)).forEach(x => answers[x.name.slice(1)] = x.value); return act(() => api("/api/answer", { as: S.me, task: arg, answers }), t("saved")); }
+  if (kind === "reply") return act(() => api("/api/reply", { as: S.me, thread: arg, text }), "");
+  if (kind === "ask") return act(() => api("/api/chat", { as: S.me, task: form.task.value, text }).then(r => { S.tab = "messages"; S.thread = r.thread; }), t("sent"));
+  if (kind === "ticket") return act(() => api("/api/ticket", { as: S.me, text }).then(r => { S.tab = "messages"; S.thread = r.thread; }), t("ticket"));
+});
+document.addEventListener("keydown", e => { if (e.key === "Escape") closeDrawer(); });
+init().catch(e => { document.body.insertAdjacentHTML("beforeend", `<p style="padding:24px">${esc(e.message)}</p>`); });
+</script>
+</body>
+</html>
