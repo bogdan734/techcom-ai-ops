@@ -36,6 +36,7 @@ class TeamSettings:
     calls: bool
     call_window: tuple[time, time]
     call_time: time
+    code_root: Path
 
     @classmethod
     def from_env(cls, env: Mapping[str, str]) -> TeamSettings | None:
@@ -85,6 +86,7 @@ class TeamSettings:
             calls=calls in ("true", "1"),
             call_window=_window(text("CALL_WINDOW", "09:00-18:00")),
             call_time=_clock(env.get("CALL_TIME", "").strip()),
+            code_root=_code_root(env),
         )
 
     def call_open(self) -> bool:
@@ -113,7 +115,16 @@ class TeamSettings:
             "ladder_step_days": self.ladder_step_days,
             "calls": self.calls,
             "call_open": self.calls and self.call_open(),
+            "code_root": str(self.code_root),
         }
+
+
+def _code_root(env: Mapping[str, str]) -> Path:
+    """Where ``code_path`` is resolved: ``CODE_ROOT``, else the folder of the tasks file."""
+    explicit = env.get("CODE_ROOT", "").strip()
+    if explicit:
+        return Path(explicit)
+    return Path(env.get("TASKS_FILE", "").strip() or "fixtures/tasks.json").parent
 
 
 def _window(raw: str) -> tuple[time, time]:
