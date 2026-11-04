@@ -68,8 +68,8 @@ _TEMPLATES: Mapping[Kind, str] = {
         "Reminder: the completion check for {task_id} ({title}) is waiting for answers."
     ),
     Kind.QUIZ_CALL: (
-        "This is a reminder from the follow-up service. "
-        "The completion check for task {task_id} is waiting for your answers."
+        "This is the follow-up service for {assignee}. "
+        "The completion check for task {task_id} is waiting for your answers.{spoken}"
     ),
     Kind.VERDICT: "Completion check for {task_id} ({title}) by {assignee}: {verdict}.{detail}",
     Kind.NEEDS_REVIEW: (

@@ -293,7 +293,7 @@ def test_a_call_nobody_took_tells_the_issuer(tmp_path):
         for m in world.notices(check, result, task(), extras(), day(3))
         if m.kind is Kind.QUIZ_CALL
     )
-    record_result(world.db, call.message_id, "eve", AnsweredBy.NONE, "reminder", day(3))
+    record_result(world.db, call.message_id, "eve", "TC-1", AnsweredBy.NONE, "reminder", day(3))
     out = world.notices(check, result, task(), extras(), day(3))
     unreached = [m for m in out if m.kind is Kind.UNREACHED]
     assert [(m.recipient, m.state_key) for m in unreached] == [("max", call.message_id)]

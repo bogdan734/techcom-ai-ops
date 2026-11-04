@@ -13,7 +13,7 @@ from collections.abc import Mapping
 from followup.guard import screen_text
 
 from .access import CHAT_TABLES
-from .chat import open_thread, post
+from .chat import close_thread, open_thread, post
 from .context import ActionError, Context, read_all
 from .dashboard import _status
 from .notices import issuer_of
@@ -192,6 +192,25 @@ def reply(ctx: Context, viewer: Person, thread_id: str, text: str) -> None:
                 raise ActionError(str(exc)) from exc
             finally:
                 db.close()
+            return
+    raise ActionError(f"no thread {thread_id}")
+
+
+def finish(ctx: Context, viewer: Person, thread_id: str) -> None:
+    """Mark a conversation done; it drops into the done list until someone writes again."""
+    for name in ctx.vault.departments():
+        probe = ctx.open(name)
+        if probe is not None and read_all(
+            probe, "SELECT 1 FROM threads WHERE thread_id = ?", (thread_id,)
+        ):
+            try:
+                db = ctx.vault.open(name, viewer, CHAT_TABLES)
+                try:
+                    close_thread(db, thread_id, viewer.id)
+                finally:
+                    db.close()
+            except PermissionError as exc:
+                raise ActionError(str(exc)) from exc
             return
     raise ActionError(f"no thread {thread_id}")
 

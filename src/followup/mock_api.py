@@ -166,6 +166,7 @@ class MockBackend:
             "placed_at": datetime.now(UTC).isoformat(timespec="seconds"),
             "answered_by": self._answered_by,
             **{f: body.get(f) for f in ("task_id", "decision", "to", "body")},
+            **{f: body[f] for f in ("purpose", "questions", "reply_to") if f in body},
         }
         self._answered_by = "person"
         self.call_records[key] = record

@@ -10,12 +10,16 @@ the answer to a quiz still comes through chat or the app.
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date
 from enum import StrEnum
-from typing import Literal
+from typing import Any, Literal
+
+import httpx2
 
 from followup.api import MessagesApi
+from followup.retry import RetryPolicy
 
 from .notices import Channel, Kind
 from .org import Person
@@ -28,12 +32,39 @@ class AnsweredBy(StrEnum):
     PERSON = "person"
     MACHINE = "machine"
     NONE = "none"
+    # The provider has not said yet; a poll or a webhook settles it.
+    PENDING = "pending"
 
 
 class CallsApi(MessagesApi):
-    """The voice provider: ``/calls`` where messages use ``/messages``, nothing else differs."""
+    """The voice provider: ``/calls`` where messages use ``/messages``, nothing else differs.
+
+    ``extras`` adds fields to the body of one call (what the call is for, the questions to read,
+    where to send the answers); the idempotency key and the reconcile-before-resend rule are the
+    message path's, unchanged.
+    """
 
     PATH = "/calls"
+
+    def __init__(
+        self,
+        http: httpx2.Client,
+        policy: RetryPolicy,
+        extras: dict[str, Mapping[str, Any]] | None = None,
+    ) -> None:
+        super().__init__(http, policy)
+        self.extras: dict[str, Mapping[str, Any]] = extras if extras is not None else {}
+
+    def post(self, idempotency_key: str, payload: dict[str, Any]) -> httpx2.Response:
+        return super().post(idempotency_key, {**payload, **self.extras.get(idempotency_key, {})})
+
+
+def provider_client(team: TeamSettings) -> httpx2.Client | None:
+    """A client for a real voice provider, or ``None`` to use the mock beside the messages."""
+    if not team.calls or team.calls_provider != "http":
+        return None
+    headers = {"Authorization": f"Bearer {team.calls_api_key}"} if team.calls_api_key else {}
+    return httpx2.Client(base_url=team.calls_api_url, headers=headers, timeout=30.0)
 
 
 @dataclass(frozen=True)
@@ -45,7 +76,12 @@ class Rung:
 
 
 def ladder(
-    issued_on: date, today: date, step_days: int, callable_now: bool, purpose: Purpose
+    issued_on: date,
+    today: date,
+    step_days: int,
+    callable_now: bool,
+    purpose: Purpose,
+    call_purpose: Purpose = "reminder",
 ) -> list[Rung]:
     """The rungs due so far: the check at once, a reminder after one step, a call after two."""
     waited = max((today - issued_on).days, 0) // step_days
@@ -53,7 +89,7 @@ def ladder(
     if waited >= 1:
         rungs.append(Rung(1, Kind.QUIZ_REMINDER, Channel.MESSAGE, "reminder"))
     if waited >= 2 and callable_now:
-        rungs.append(Rung(2, Kind.QUIZ_CALL, Channel.CALL, "reminder"))
+        rungs.append(Rung(2, Kind.QUIZ_CALL, Channel.CALL, call_purpose))
     return rungs
 
 
@@ -70,17 +106,34 @@ def counts_as_delivered(purpose: Purpose, answered: AnsweredBy) -> bool:
 
 def record_result(
     db: sqlite3.Connection,
-    action_id: str,
+    call_key: str,
     person_id: str,
+    task_id: str,
     answered: AnsweredBy,
     purpose: Purpose,
     day: date,
 ) -> None:
     db.execute(
-        "INSERT OR IGNORE INTO call_results (call_key, person_id, answered_by, purpose, placed_on) "
-        "VALUES (?, ?, ?, ?, ?)",
-        (action_id, person_id, answered.value, purpose, day.isoformat()),
+        "INSERT OR IGNORE INTO call_results "
+        "(call_key, person_id, task_id, answered_by, purpose, placed_on) VALUES (?, ?, ?, ?, ?, ?)",
+        (call_key, person_id, task_id, answered.value, purpose, day.isoformat()),
     )
+
+
+def settle_result(db: sqlite3.Connection, call_key: str, answered: AnsweredBy) -> bool:
+    """Replace ``pending`` with what the provider reported; a settled result never changes."""
+    if answered is AnsweredBy.PENDING:
+        return False
+    cursor = db.execute(
+        "UPDATE call_results SET answered_by = ? WHERE call_key = ? AND answered_by = 'pending'",
+        (answered.value, call_key),
+    )
+    return cursor.rowcount == 1
+
+
+def pending_calls(db: sqlite3.Connection) -> list[str]:
+    rows = db.execute("SELECT call_key FROM call_results WHERE answered_by = 'pending' ORDER BY 1")
+    return [key for (key,) in rows.fetchall()]
 
 
 def results(db: sqlite3.Connection) -> dict[str, tuple[AnsweredBy, Purpose]]:

@@ -4,6 +4,7 @@ from contextlib import closing
 from datetime import date
 from types import SimpleNamespace
 
+import httpx2
 import pytest
 
 from conftest import no_wait_policy, raw_task
@@ -63,7 +64,7 @@ class Env:
     def settings(self, today):
         return Settings.from_env({"OUT_DIR": str(self.out), "EVALUATION_DATE": today})
 
-    def run(self, recs, today="2026-10-21", faults=None, team=None, client=None):
+    def run(self, recs, today="2026-10-21", faults=None, team=None, client=None, calls_http=None):
         settings = self.settings(today)
         backend = MockBackend(
             recs,
@@ -73,9 +74,18 @@ class Env:
         )
         tasks, _ = normalise_all(recs)
         gateway = LLMGateway(client or StubClient(), 500)
+        self.backend = backend
         with backend.client() as http:
             return team_run(
-                settings, team or self.team, recs, tasks, http, no_wait_policy(), gateway, gateway
+                settings,
+                team or self.team,
+                recs,
+                tasks,
+                http,
+                no_wait_policy(),
+                gateway,
+                gateway,
+                calls_http,
             )
 
     def log(self):
@@ -306,12 +316,93 @@ def _ladder_department(failing=()):
     return department, quiz, reminder, outbox
 
 
-def test_a_reminder_waits_until_its_quiz_was_sent():
+def test_a_reminder_waits_until_its_quiz_was_sent(tmp_path):
+    team = team_settings(tmp_path)
     org = Org.from_records(sample_people())
     department, quiz, reminder, outbox = _ladder_department(failing=True)
-    assert _deliver({"engineering": department}, org, None, date(2026, 10, 22)) == 1
+    assert _deliver({"engineering": department}, org, None, team, date(2026, 10, 22)) == 1
     assert outbox.delivered == [quiz.message_id]  # the reminder was not even tried
 
     department, quiz, reminder, outbox = _ladder_department()
-    assert _deliver({"engineering": department}, org, None, date(2026, 10, 22)) == 0
+    assert _deliver({"engineering": department}, org, None, team, date(2026, 10, 22)) == 0
     assert outbox.delivered == [quiz.message_id, reminder.message_id]  # in order, in one pass
+
+
+def _voice_provider(states):
+    """A voice vendor that reports a call's outcome late: the answers come one GET at a time."""
+    placed: dict[str, dict] = {}
+
+    def handler(request):
+        if request.method == "POST":
+            key = request.headers["Idempotency-Key"]
+            placed[key] = {
+                "message_id": "v-1",
+                "idempotency_key": key,
+                **json.loads(request.content),
+            }
+            return httpx2.Response(201, json=placed[key])
+        record = placed.get(request.url.path.rsplit("/", 1)[-1])
+        if record is None:
+            return httpx2.Response(404, json={"error": "no such call"})
+        state = states.pop(0) if len(states) > 1 else states[0]
+        return httpx2.Response(200, json={**record, "answered_by": state})
+
+    return httpx2.Client(
+        base_url="https://voice.example", transport=httpx2.MockTransport(handler)
+    ), placed
+
+
+def _call_rows(env):
+    with closing(sqlite3.connect(env.out / "state" / "engineering.db")) as db:
+        return db.execute("SELECT task_id, answered_by, purpose FROM call_results").fetchall()
+
+
+def test_calls_go_to_the_configured_provider_with_the_questions_to_read(tmp_path):
+    env = Env(
+        tmp_path,
+        CALLS="true",
+        CALL_PURPOSE="verification",
+        CALLS_CALLBACK_URL="https://app.example/api/webhooks/call",
+    )
+    voice, placed = _voice_provider(["person"])
+    env.run(records())
+    for day in ("2026-10-22", "2026-10-23", "2026-10-24"):
+        env.run(records("Done"), today=day, calls_http=voice)
+    assert env.backend.call_records == {}  # nothing went to the mock beside the messages
+    (call,) = placed.values()
+    assert call["to"] == "+15550000001" and call["purpose"] == "verification"
+    assert call["reply_to"] == "https://app.example/api/webhooks/call"
+    assert [q["number"] for q in call["questions"]] == [1, 2, 3][: len(call["questions"])]
+    assert "Question 1:" in call["body"] and "Please answer each question" in call["body"]
+    assert _call_rows(env) == [("TC-1", "person", "verification")]
+
+
+def test_a_call_whose_outcome_comes_late_stays_pending_until_the_provider_says(tmp_path):
+    env = Env(tmp_path, CALLS="true")
+    voice, placed = _voice_provider(["pending", "machine"])
+    env.run(records())
+    for day in ("2026-10-22", "2026-10-23", "2026-10-24"):
+        env.run(records("Done"), today=day, calls_http=voice)
+    assert _call_rows(env) == [("TC-1", "pending", "reminder")]
+    before = len(env.log())
+    env.run(records("Done"), today="2026-10-25", calls_http=voice)  # the next run asks again
+    assert _call_rows(env) == [("TC-1", "machine", "reminder")]
+    assert len(placed) == 1  # asking is not dialling again
+    assert any("not answered by a person (voicemail)" in e["body"] for e in env.log()[before:])
+
+
+def test_a_reminder_call_text_has_no_questions(tmp_path):
+    env = Env(tmp_path, CALLS="true")
+    for day, status in (
+        ("2026-10-21", "Working on it"),
+        ("2026-10-22", "Done"),
+        ("2026-10-23", "Done"),
+        ("2026-10-24", "Done"),
+    ):
+        env.run(records(status), today=day)
+    (call,) = env.backend.call_records.values()
+    assert (
+        call["purpose"] == "reminder"
+        and "questions" not in call
+        and "Question 1" not in call["body"]
+    )

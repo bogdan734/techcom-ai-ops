@@ -6,6 +6,7 @@ import httpx2
 import pytest
 
 from conftest import no_wait_policy
+from followup.config import ConfigError
 from followup.delivery import Outbox
 from followup.faults import FaultSpecError, parse_faults
 from followup.mock_api import MockBackend
@@ -16,8 +17,11 @@ from followup.team.calls import (
     can_call,
     counts_as_delivered,
     ladder,
+    pending_calls,
+    provider_client,
     record_result,
     results,
+    settle_result,
 )
 from followup.team.notices import Channel, Kind, Message, to_action
 from followup.team.schema import DEPARTMENT_STEPS
@@ -37,7 +41,14 @@ def post(mock, key, body=BODY):
 
 
 def call_action():
-    message = Message(Kind.QUIZ_CALL, "TC-1", "eve", Channel.CALL, "k", {"task_id": "TC-1"})
+    message = Message(
+        Kind.QUIZ_CALL,
+        "TC-1",
+        "eve",
+        Channel.CALL,
+        "k",
+        {"task_id": "TC-1", "assignee": "Eve", "spoken": ""},
+    )
     return to_action(message, "+15550000001")
 
 
@@ -149,8 +160,8 @@ def test_results_round_trip_and_are_first_writer_wins():
     db = sqlite3.connect(":memory:", isolation_level=None)
     for step in DEPARTMENT_STEPS:
         db.executescript(step.sql)
-    record_result(db, "k1", "eve", AnsweredBy.MACHINE, "reminder", D0)
-    record_result(db, "k1", "eve", AnsweredBy.PERSON, "reminder", D0)
+    record_result(db, "k1", "eve", "TC-1", AnsweredBy.MACHINE, "reminder", D0)
+    record_result(db, "k1", "eve", "TC-1", AnsweredBy.PERSON, "reminder", D0)
     assert results(db) == {"k1": (AnsweredBy.MACHINE, "reminder")}
 
 
@@ -162,3 +173,76 @@ def test_cli_accepts_call_machine_fault():
     with pytest.raises(FaultSpecError):
         parse_faults(["send=machine"])
     assert httpx2  # the mock speaks httpx2, as the service does
+
+
+def test_a_real_provider_needs_https_unless_it_is_this_computer(tmp_path):
+    base = {"CALLS": "true", "CALLS_PROVIDER": "http"}
+    for bad in ("", "http://voice.example", "ftp://voice.example"):
+        with pytest.raises(ConfigError, match="CALLS_API_URL"):
+            team_settings(tmp_path, **base, CALLS_API_URL=bad)
+    assert (
+        team_settings(tmp_path, **base, CALLS_API_URL="https://voice.example").calls_provider
+        == "http"
+    )
+    assert (
+        team_settings(tmp_path, **base, CALLS_API_URL="http://127.0.0.1:9000").calls_provider
+        == "http"
+    )
+
+
+def test_unknown_provider_purpose_or_a_short_secret_are_refused(tmp_path):
+    with pytest.raises(ConfigError, match="CALLS_PROVIDER"):
+        team_settings(tmp_path, CALLS_PROVIDER="carrier-pigeon")
+    with pytest.raises(ConfigError, match="CALL_PURPOSE"):
+        team_settings(tmp_path, CALL_PURPOSE="chat")
+    with pytest.raises(ConfigError, match="CALLS_WEBHOOK_SECRET"):
+        team_settings(tmp_path, CALLS_WEBHOOK_SECRET="short")
+
+
+def test_secrets_stay_out_of_repr_and_out_of_the_decision_digest(tmp_path):
+    settings = team_settings(
+        tmp_path, CALLS_API_KEY="key-123456", CALLS_WEBHOOK_SECRET="webhook-secret-123456"
+    )
+    text = repr(settings) + repr(settings.decision_fields())
+    assert "key-123456" not in text and "webhook-secret-123456" not in text
+
+
+def test_provider_client_is_only_built_for_a_real_provider(tmp_path):
+    assert provider_client(team_settings(tmp_path)) is None
+    assert provider_client(team_settings(tmp_path, CALLS="true")) is None  # the mock
+    real = team_settings(
+        tmp_path,
+        CALLS="true",
+        CALLS_PROVIDER="http",
+        CALLS_API_URL="https://voice.example",
+        CALLS_API_KEY="k-1",
+    )
+    client = provider_client(real)
+    assert str(client.base_url).startswith("https://voice.example")
+    assert client.headers["Authorization"] == "Bearer k-1"
+    client.close()
+    off = team_settings(tmp_path, CALLS="false", CALLS_PROVIDER="http")
+    assert provider_client(off) is None
+
+
+def test_extras_ride_along_with_the_call_and_nothing_else_changes(tmp_path):
+    mock = backend(tmp_path)
+    api = CallsApi(
+        mock.client(),
+        no_wait_policy(),
+        {"k9": {"purpose": "verification", "questions": [{"number": 1}]}},
+    )
+    assert api.post("k9", BODY).json()["purpose"] == "verification"
+    assert "purpose" not in api.post("k10", BODY).json()
+
+
+def test_a_pending_result_settles_once_and_never_changes_again():
+    db = sqlite3.connect(":memory:", isolation_level=None)
+    for step in DEPARTMENT_STEPS:
+        db.executescript(step.sql)
+    record_result(db, "k1", "eve", "TC-1", AnsweredBy.PENDING, "verification", D0)
+    assert pending_calls(db) == ["k1"]
+    assert settle_result(db, "k1", AnsweredBy.PENDING) is False
+    assert settle_result(db, "k1", AnsweredBy.MACHINE) is True
+    assert settle_result(db, "k1", AnsweredBy.PERSON) is False
+    assert results(db) == {"k1": (AnsweredBy.MACHINE, "verification")} and pending_calls(db) == []

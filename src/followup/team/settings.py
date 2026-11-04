@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, time
 from pathlib import Path
 
@@ -12,6 +12,9 @@ from followup.config import ConfigError
 from .org import Org
 
 VISIBILITY = ("hidden", "issuers")
+CALL_PROVIDERS = ("mock", "http")
+CALL_PURPOSES = ("reminder", "verification")
+MIN_SECRET = 16
 
 
 @dataclass(frozen=True)
@@ -37,6 +40,13 @@ class TeamSettings:
     call_window: tuple[time, time]
     call_time: time
     code_root: Path
+    calls_provider: str
+    calls_api_url: str
+    calls_callback_url: str
+    call_purpose: str
+    # Secrets stay out of repr, so a traceback or a log line cannot print them.
+    calls_api_key: str = field(repr=False)
+    calls_webhook_secret: str = field(repr=False)
 
     @classmethod
     def from_env(cls, env: Mapping[str, str]) -> TeamSettings | None:
@@ -64,6 +74,17 @@ class TeamSettings:
         calls = text("CALLS", "false").lower()
         if calls not in ("true", "false", "1", "0"):
             raise ConfigError(f"CALLS={calls!r} is not true, false, 1 or 0")
+        provider, purpose = text("CALLS_PROVIDER", "mock").lower(), text("CALL_PURPOSE", "reminder")
+        if provider not in CALL_PROVIDERS:
+            raise ConfigError(f"CALLS_PROVIDER={provider!r}, expected one of {CALL_PROVIDERS}")
+        if purpose not in CALL_PURPOSES:
+            raise ConfigError(f"CALL_PURPOSE={purpose!r}, expected one of {CALL_PURPOSES}")
+        api_url = text("CALLS_API_URL", "")
+        if calls in ("true", "1") and provider == "http":
+            _check_url(api_url)
+        secret = text("CALLS_WEBHOOK_SECRET", "")
+        if secret and len(secret) < MIN_SECRET:
+            raise ConfigError(f"CALLS_WEBHOOK_SECRET must be at least {MIN_SECRET} characters")
         path = Path(org_file)
         return cls(
             org_file=path,
@@ -87,6 +108,12 @@ class TeamSettings:
             call_window=_window(text("CALL_WINDOW", "09:00-18:00")),
             call_time=_clock(env.get("CALL_TIME", "").strip()),
             code_root=_code_root(env),
+            calls_provider=provider,
+            calls_api_url=api_url,
+            calls_callback_url=text("CALLS_CALLBACK_URL", ""),
+            call_purpose=purpose,
+            calls_api_key=env.get("CALLS_API_KEY", "").strip(),
+            calls_webhook_secret=secret,
         )
 
     def call_open(self) -> bool:
@@ -116,7 +143,16 @@ class TeamSettings:
             "calls": self.calls,
             "call_open": self.calls and self.call_open(),
             "code_root": str(self.code_root),
+            "calls_provider": self.calls_provider,
+            "call_purpose": self.call_purpose,
         }
+
+
+def _check_url(url: str) -> None:
+    """A real voice provider is reached over TLS; plain HTTP is for this computer only."""
+    local = url.startswith(("http://127.0.0.1", "http://localhost"))
+    if not (url.startswith("https://") or local):
+        raise ConfigError("CALLS_PROVIDER=http needs CALLS_API_URL starting with https://")
 
 
 def _code_root(env: Mapping[str, str]) -> Path:

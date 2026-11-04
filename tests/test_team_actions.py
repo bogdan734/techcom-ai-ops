@@ -196,3 +196,22 @@ def test_nothing_runs_before_the_first_run(tmp_path):
     with pytest.raises(ActionError, match="nothing has run yet"):
         open_ticket(ctx, person(ctx, "eve"), "help")
     assert board(ctx, "eve").mine[0].status == "none"
+
+
+def test_a_finished_conversation_drops_into_the_done_list_until_someone_writes(tmp_path):
+    from followup.team.actions import finish
+
+    ctx = started(tmp_path)
+    thread = say(ctx, person(ctx, "eve"), "TC-1", "Who signs off the invoice?")
+    run_day(tmp_path, world_records("Done"), "2026-10-23")
+    ctx = world_context(tmp_path, world_records("Done"), "2026-10-23")
+    assert board(ctx, "eve").threads[0].waiting and not board(ctx, "eve").threads[0].closed
+    finish(ctx, person(ctx, "eve"), thread)
+    view = board(ctx, "eve").threads[0]
+    assert view.closed and not view.waiting
+    with pytest.raises(ActionError, match="not in thread|may not open"):
+        finish(ctx, person(ctx, "finn"), thread)
+    with pytest.raises(ActionError, match="no thread"):
+        finish(ctx, person(ctx, "eve"), "missing")
+    reply(ctx, person(ctx, "max"), thread, "Finance does.")
+    assert not board(ctx, "eve").threads[0].closed

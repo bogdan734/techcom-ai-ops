@@ -107,7 +107,23 @@ def post(
         "VALUES (?, ?, ?, ?, ?, ?, ?)",
         (mid, thread, author, clean, quote, int(flagged), day.isoformat()),
     )
+    # A new message reopens a thread that was marked done.
+    db.execute(
+        "UPDATE threads SET status = 'open' WHERE thread_id = ? AND status = 'closed'", (thread,)
+    )
     return next(p for p in posts_of(db, thread) if p.message_id == mid)
+
+
+def close_thread(db: sqlite3.Connection, thread: str, person: str) -> None:
+    """Mark a thread done: it stops waiting and stops climbing until someone writes again."""
+    if person not in members_of(db, thread):
+        raise PermissionError(f"{person} is not in thread {thread}")
+    db.execute("UPDATE threads SET status = 'closed' WHERE thread_id = ?", (thread,))
+
+
+def is_closed(db: sqlite3.Connection, thread: str) -> bool:
+    row = db.execute("SELECT status FROM threads WHERE thread_id = ?", (thread,)).fetchone()
+    return bool(row) and row[0] == "closed"
 
 
 def read_thread(db: sqlite3.Connection, thread: str, viewer: str) -> list[Post]:
@@ -121,6 +137,8 @@ def pending_questions(db: sqlite3.Connection) -> list[Pending]:
     """Threads whose latest question has no human answer and no quoted reply from the assistant."""
     found = []
     for tid, kind, task_id, _ in _threads(db):
+        if is_closed(db, tid):
+            continue
         members = members_of(db, tid)
         waiting = waiting_question(posts_of(db, tid), members)
         if waiting is not None:
@@ -148,7 +166,7 @@ def chat_notices(
         ref = task_id if kind == "task" else f"SUPPORT-{tid[:8]}"
         for index, current in enumerate(posts):
             messages += _post_notices(kind, ref, current, posts[index + 1 :], members, org)
-        waiting = waiting_question(posts, members)
+        waiting = None if is_closed(db, tid) else waiting_question(posts, members)
         if waiting is None:
             continue
         sla = team.support_sla_days if kind == "support" else team.chat_sla_days

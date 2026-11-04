@@ -341,6 +341,7 @@ def _run_team(
     policy: RetryPolicy,
     llm: LLMClient,
 ) -> None:
+    from .team.calls import provider_client
     from .team.runner import team_run
 
     team = settings.team
@@ -365,7 +366,14 @@ def _run_team(
         if team.audit_model and settings.provider == "anthropic":
             other = make_llm(replace(settings, model=team.audit_model))
             audit_gateway = LLMGateway(other, settings.llm_max_calls)
-        result = team_run(settings, team, records, tasks, http, policy, gateway, audit_gateway)
+        calls_http = provider_client(team)
+        try:
+            result = team_run(
+                settings, team, records, tasks, http, policy, gateway, audit_gateway, calls_http
+            )
+        finally:
+            if calls_http is not None:
+                calls_http.close()
     report.outcomes, report.team = result.outcomes, result
     report.llm = gateway.usage
     if audit_gateway is not gateway:

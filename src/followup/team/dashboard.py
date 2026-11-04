@@ -13,7 +13,7 @@ from typing import Any
 
 from followup.models import Task
 
-from .chat import ASSISTANT, members_of, posts_of, waiting_question
+from .chat import ASSISTANT, is_closed, members_of, posts_of, waiting_question
 from .context import Context, read_all
 from .grading import Grade, quiz_verdict
 from .notices import issuer_of
@@ -68,6 +68,7 @@ class ThreadView:
     task_id: str
     subject: str
     waiting: bool
+    closed: bool
     posts: tuple[PostView, ...]
 
 
@@ -287,7 +288,8 @@ def _threads(ctx: Context, viewer: Person) -> list[ThreadView]:
                     kind,
                     task_id,
                     subject,
-                    waiting_question(posts, members) is not None,
+                    waiting_question(posts, members) is not None and not is_closed(db, thread_id),
+                    is_closed(db, thread_id),
                     tuple(
                         PostView(
                             _name(ctx, p.author),

@@ -25,7 +25,7 @@ from .dashboard import build_dashboard, explain, to_markdown
 from .vault import VaultError
 
 EXIT_BUSY = 75
-_WRITING = frozenset({"answer", "review", "clear", "reply"})
+_WRITING = frozenset({"answer", "review", "clear", "reply", "done"})
 
 
 def add_team_parser(commands: argparse._SubParsersAction) -> None:
@@ -72,6 +72,8 @@ def add_team_parser(commands: argparse._SubParsersAction) -> None:
     reply = command("reply", "write in a thread you are in")
     reply.add_argument("thread", metavar="THREAD")
     reply.add_argument("text")
+    done = command("done", "mark a conversation done")
+    done.add_argument("thread", metavar="THREAD")
     support = command("support", "list your tickets, or open one")
     support.add_argument("text", nargs="?", help="what is wrong; omit to list tickets")
     calibrate = command("calibrate", "score the grader against labelled answers", who=False)
@@ -83,6 +85,7 @@ def add_team_parser(commands: argparse._SubParsersAction) -> None:
     serve.add_argument("--port", type=int, default=8765)
     serve.add_argument("--scenario", metavar="FILE", help="days to step through in the app")
     serve.add_argument("--no-open", action="store_true", help="do not open a browser")
+    serve.add_argument("--fresh", action="store_true", help="start from an empty state directory")
     add_db_parser(sub)
 
 
@@ -219,6 +222,12 @@ def _reply(ctx: Context, args: argparse.Namespace) -> int:
     return 0
 
 
+def _done(ctx: Context, args: argparse.Namespace) -> int:
+    actions.finish(ctx, ctx.person(args.who), args.thread)
+    print("marked done; a new message reopens it")
+    return 0
+
+
 def _support(ctx: Context, args: argparse.Namespace) -> int:
     viewer = ctx.person(args.who)
     if args.text:
@@ -256,6 +265,7 @@ _HANDLERS: dict[str, Callable[[Context, argparse.Namespace], int]] = {
     "trust": _trust,
     "chat": _chat,
     "reply": _reply,
+    "done": _done,
     "support": _support,
     "calibrate": _calibrate,
     "report": _report,

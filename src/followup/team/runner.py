@@ -19,7 +19,7 @@ from typing import Any
 
 import httpx2
 
-from followup.api import MessagesApi
+from followup.api import ApiError, MessagesApi
 from followup.config import Settings
 from followup.delivery import Outbox
 from followup.drafting import Drafter
@@ -31,7 +31,7 @@ from followup.retry import CircuitBreaker, RetryPolicy
 from followup.store import Store
 
 from .assistant import Assistant
-from .calls import AnsweredBy, CallsApi, record_result
+from .calls import AnsweredBy, CallsApi, pending_calls, record_result, settle_result
 from .chat import ASSISTANT, chat_notices, pending_questions, post
 from .check import ModelAudit
 from .completion import CheckResult, CompletionCheck
@@ -56,7 +56,7 @@ from .notices import (
     to_action,
 )
 from .org import Role
-from .quiz import QuizMaker
+from .quiz import QuizMaker, open_quiz
 from .routes import pin_routes
 from .schema import CONTROL
 from .settings import TeamSettings
@@ -100,7 +100,9 @@ def team_run(
     policy: RetryPolicy,
     gateway: LLMGateway,
     audit_gateway: LLMGateway,
+    calls_http: httpx2.Client | None = None,
 ) -> TeamResult:
+    """``calls_http``: a real voice provider's client; without one, calls use the mock."""
     out, today, org = settings.out_dir, settings.today, team.org
     vault = Vault(out / "state", org, team.trust_visibility)
     check_legacy(out, vault)
@@ -125,7 +127,7 @@ def team_run(
         audit = ModelAudit(Ledger(control, "model_events"), gateway.model, team, today)
         trust = Ledger(control, "trust_events")
         breaker = CircuitBreaker()
-        calls_api = CallsApi(http, policy)
+        calls_api = CallsApi(calls_http or http, policy)
         for name in names:
             departments[name] = _open(
                 name,
@@ -139,6 +141,7 @@ def team_run(
                 audit,
                 trust,
                 breaker,
+                calls_api,
             )
 
         # The base rules, per task, against the store of the task's department.
@@ -165,13 +168,14 @@ def team_run(
                 open_by_owner.setdefault(task.owner, []).append(task)
         for name, department in departments.items():
             mine = sorted((t for t in tasks if routes[t.task_id] == name), key=lambda t: t.task_id)
+            _settle_calls(department, calls_api)
             _team_pass(department, mine, extras, open_by_owner, team, today)
         boss = org.with_role(Role.BOSS)[0]
         departments[boss.department].messages += next(
             iter(departments.values())
         ).check.model_notices()
 
-        undelivered = _deliver(departments, org, calls_api, today)
+        undelivered = _deliver(departments, org, calls_api, team, today)
         path = out / ARTEFACT
         _write_artefact(path, settings, departments)
         digest = file_digest(path)
@@ -205,11 +209,12 @@ def _open(
     audit: ModelAudit,
     trust: Ledger,
     breaker: CircuitBreaker,
+    calls_api: CallsApi,
 ) -> _Department:
     store = Store(vault.path(name), settings.today)
     db = vault.open(name)
     outbox = Outbox(store, MessagesApi(http, policy), policy, breaker, settings.max_failed_runs)
-    calls = Outbox(store, CallsApi(http, policy), policy, breaker, settings.max_failed_runs)
+    calls = Outbox(store, calls_api, policy, breaker, settings.max_failed_runs)
     check = CompletionCheck(
         team.org,
         team,
@@ -256,7 +261,20 @@ def _team_pass(
     ]
 
 
-def _deliver(departments: Mapping[str, _Department], org, calls_api: CallsApi, today) -> int:
+def _settle_calls(department: _Department, calls_api: CallsApi) -> None:
+    """Ask the provider about calls whose outcome was not known yet; some report late."""
+    for key in pending_calls(department.db):
+        try:
+            found = calls_api.find(key)
+        except ApiError:
+            continue  # the provider is down: it stays pending and the next run asks again
+        if found and found.get("answered_by"):
+            settle_result(department.db, key, AnsweredBy(found["answered_by"]))
+
+
+def _deliver(
+    departments: Mapping[str, _Department], org, calls_api: CallsApi, team: TeamSettings, today
+) -> int:
     undelivered = 0
     for name in sorted(departments):
         department = departments[name]
@@ -266,22 +284,50 @@ def _deliver(departments: Mapping[str, _Department], org, calls_api: CallsApi, t
                 continue  # a reminder waits for its quiz, a call for its reminder
             person = org.person(message.recipient)
             call = message.channel is Channel.CALL
+            purpose = team.call_purpose if message.kind is Kind.QUIZ_CALL else "reminder"
+            if call:
+                calls_api.extras[message.message_id] = _call_extras(
+                    department, message, person.id, purpose, team
+                )
             action = to_action(message, person.phone if call else person.name)
             delivery = (department.calls if call else department.outbox).deliver(action)
             if delivery.status in _UNSETTLED:
                 undelivered += 1
-            elif call:
+            elif call and delivery.status in ("sent", "reconciled"):
                 found = calls_api.find(message.message_id)
-                if found is not None:
-                    record_result(
-                        department.db,
-                        message.message_id,
-                        person.id,
-                        AnsweredBy(found["answered_by"]),
-                        "reminder" if message.kind is Kind.QUIZ_CALL else "verification",
-                        today,
-                    )
+                answered = (
+                    AnsweredBy(found.get("answered_by") or "pending")
+                    if found
+                    else AnsweredBy.PENDING
+                )
+                record_result(
+                    department.db,
+                    message.message_id,
+                    person.id,
+                    message.task_id,
+                    answered,
+                    purpose,
+                    today,
+                )
     return undelivered
+
+
+def _call_extras(
+    department: _Department, message: Message, person: str, purpose: str, team: TeamSettings
+) -> dict[str, Any]:
+    """What a voice provider needs beyond the words: why it calls, what to ask, where to answer."""
+    extras: dict[str, Any] = {"purpose": purpose}
+    if team.calls_callback_url:
+        extras["reply_to"] = team.calls_callback_url
+    if purpose == "verification":
+        quiz = open_quiz(department.db, message.task_id, person)
+        if quiz is not None:
+            extras["questions"] = [
+                {"number": n, "prompt": q.prompt}
+                for n, q in enumerate(quiz.questions, start=1)
+                if q.graded
+            ]
+    return extras
 
 
 def _depth(message: Message, by_id: Mapping[str, Message]) -> int:

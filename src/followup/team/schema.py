@@ -120,7 +120,8 @@ _DEPARTMENT_TABLES = Step(
     CREATE TABLE call_results (
         call_key    TEXT PRIMARY KEY,
         person_id   TEXT NOT NULL,
-        answered_by TEXT NOT NULL CHECK (answered_by IN ('person', 'machine', 'none')),
+        task_id     TEXT NOT NULL,
+        answered_by TEXT NOT NULL CHECK (answered_by IN ('person', 'machine', 'none', 'pending')),
         purpose     TEXT NOT NULL CHECK (purpose IN ('reminder', 'verification')),
         placed_on   TEXT NOT NULL
     );

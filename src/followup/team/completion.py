@@ -275,13 +275,22 @@ class CompletionCheck:
             f"{n}. {q.prompt}" + ("" if q.graded else " (not scored)")
             for n, q in enumerate(quiz.questions, start=1)
         ]
-        facts = {**base, "assignee_id": owner.id, "questions": "\n".join(lines)}
+        spoken = ""
+        if self.team.call_purpose == "verification":
+            read = " ".join(
+                f"Question {n}: {q.prompt}"
+                for n, q in enumerate(quiz.questions, start=1)
+                if q.graded
+            )
+            spoken = " Please answer each question after it is read. " + read
+        facts = {**base, "assignee_id": owner.id, "questions": "\n".join(lines), "spoken": spoken}
         rungs = ladder(
             quiz.issued_on,
             today,
             self.team.ladder_step_days,
             can_call(owner, self.team),
             "verification",
+            self.team.call_purpose,
         )
         for rung in rungs:
             message = Message(
@@ -290,7 +299,8 @@ class CompletionCheck:
             out.append(message)
             previous = message.message_id
             outcome = outcomes.get(message.message_id)
-            if rung.channel is Channel.CALL and outcome and outcome[0] is not AnsweredBy.PERSON:
+            settled_no_person = outcome and outcome[0] in (AnsweredBy.MACHINE, AnsweredBy.NONE)
+            if rung.channel is Channel.CALL and settled_no_person:
                 how = "no answer" if outcome[0] is AnsweredBy.NONE else "voicemail"
                 reached = {**base, "recipient_name": owner.name, "answered_by": how}
                 out.append(

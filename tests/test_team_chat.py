@@ -178,3 +178,40 @@ def test_support_ticket_notifies_every_support_person(team):
     # support has its own SLA (one day), then it climbs above the first support person
     late = chat_notices(db, org, D0 + timedelta(days=2), team)
     assert [m.recipient for m in late if m.kind is Kind.CHAT_ESCALATED] == ["sid", "bea"]
+
+
+def test_a_done_thread_stops_waiting_and_stops_climbing(team):
+    from followup.team.chat import close_thread
+
+    db = memory()
+    tid = task_thread(db)
+    post(db, tid, "eve", "Which splice loss is allowed?", D0)
+    assert len(pending_questions(db)) == 1
+    close_thread(db, tid, "eve")
+    assert pending_questions(db) == []
+    assert not [
+        m
+        for m in chat_notices(db, ORG, D0 + timedelta(days=9), team)
+        if m.kind is Kind.CHAT_ESCALATED
+    ]
+
+
+def test_a_new_message_reopens_a_done_thread():
+    from followup.team.chat import close_thread, is_closed
+
+    db = memory()
+    tid = task_thread(db)
+    post(db, tid, "eve", "Which splice loss is allowed?", D0)
+    close_thread(db, tid, "max")
+    assert is_closed(db, tid)
+    post(db, tid, "eve", "One more thing.", D0 + timedelta(days=1))
+    assert not is_closed(db, tid) and len(pending_questions(db)) == 1
+
+
+def test_only_a_member_can_close_a_thread():
+    from followup.team.chat import close_thread
+
+    db = memory()
+    tid = task_thread(db)
+    with pytest.raises(PermissionError):
+        close_thread(db, tid, "finn")
