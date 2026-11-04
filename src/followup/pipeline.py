@@ -8,10 +8,10 @@ import time
 import uuid
 from collections import Counter
 from collections.abc import Mapping, Sequence
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import date
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .api import ApiError, MessagesApi, TasksApi
 from .audit import emit, run_logging
@@ -30,7 +30,11 @@ from .normalize import normalise_all
 from .notes import NoteReader
 from .retry import CircuitBreaker, RetryPolicy
 from .rules import Policy, assess, decide
+from .run_lock import hold_run_lock
 from .store import PARKED_STATUSES, Store
+
+if TYPE_CHECKING:
+    from .team.runner import TeamResult
 
 
 @dataclass
@@ -43,16 +47,20 @@ class RunReport:
     llm: Usage = field(default_factory=Usage)
     aborted: str | None = None
     dry_run: bool = False
+    team: TeamResult | None = None
 
     @property
     def exit_code(self) -> int:
         """0 all done, 1 run aborted, 2 finished but some follow-ups still owe delivery."""
         if self.aborted:
             return 1
+        if self.team is not None and self.team.replay == "mismatch":
+            return 1  # the same inputs gave another result: something is not deterministic
         # awaiting_approval is left out on purpose: a queue that waits for people must not fail a
         # scheduled run, so the run summary lists those escalations instead.
         unsettled = {"failed", "deferred", "dead"}
-        return 2 if any(o.delivery in unsettled for o in self.outcomes) else 0
+        owed = any(o.delivery in unsettled for o in self.outcomes)
+        return 2 if owed or (self.team is not None and self.team.undelivered) else 0
 
 
 # Recorded instead of a decision when the decision depends on a note nobody could read.
@@ -243,7 +251,12 @@ def run(
     ``llm`` and ``retry`` default to what the settings describe; tests pass their own.
     A dry run decides and drafts over an in-memory copy of the state and builds no outbox, so
     it cannot send, and state.db and the delivery log stay as they were.
+
+    With an org file the run is the team run: the same rules, a database per department and
+    the team pass around them. Only one run at a time works in an out directory.
     """
+    if settings.team is not None and dry_run:
+        raise ConfigError("--dry-run does not work with an org file: the team pass writes state")
     llm = llm or make_llm(settings)
     if faults and faults.get("llm"):
         llm = FaultyLLM(llm, faults["llm"])
@@ -251,7 +264,7 @@ def run(
     report = RunReport(uuid.uuid4().hex[:12], settings.today, llm.model, dry_run=dry_run)
     out = settings.out_dir
     started = time.monotonic()
-    with run_logging(out / "audit.jsonl", report.run_id):
+    with hold_run_lock(out, settings.run_lock), run_logging(out / "audit.jsonl", report.run_id):
         emit(
             "run_started",
             f"run {report.run_id}: evaluation date {settings.today}, LLM {llm.model}",
@@ -262,8 +275,16 @@ def run(
         if dry_run:
             emit("dry_run", "dry run: decisions and drafts only, nothing is sent or stored")
         backend = MockBackend(
-            load_fixture(settings.tasks_file), out / "delivery_log.jsonl", faults=faults
+            load_fixture(settings.tasks_file),
+            out / "delivery_log.jsonl",
+            faults=faults,
+            call_log=out / "call_log.jsonl" if settings.team is not None else None,
         )
+        if settings.team is not None:
+            _run_team(report, settings, backend, policy, llm)
+            write_decisions(out / "decisions.json", report.outcomes)
+            summarise(report, settings, time.monotonic() - started)
+            return report
         state = out / "state.db"
         store = Store.snapshot(state) if dry_run else Store(state, settings.today)
         try:
@@ -311,6 +332,57 @@ def run(
         write_decisions(out / "decisions.json", report.outcomes)
         summarise(report, settings, time.monotonic() - started)
     return report
+
+
+def _run_team(
+    report: RunReport,
+    settings: Settings,
+    backend: MockBackend,
+    policy: RetryPolicy,
+    llm: LLMClient,
+) -> None:
+    from .team.runner import team_run
+
+    team = settings.team
+    assert team is not None
+    with backend.client() as http:
+        try:
+            records = TasksApi(http, policy).list_tasks()
+        except ApiError as exc:
+            report.aborted = str(exc)
+            emit(
+                "run_aborted",
+                f"tasks API unavailable, nothing was sent: {exc}",
+                level=logging.ERROR,
+                error=str(exc),
+            )
+            return
+        tasks, report.rejected_records = normalise_all(records)
+        for problem in report.rejected_records:
+            emit("record_rejected", problem, level=logging.WARNING, problem=problem)
+        gateway = LLMGateway(llm, settings.llm_max_calls)
+        audit_gateway = gateway
+        if team.audit_model and settings.provider == "anthropic":
+            other = make_llm(replace(settings, model=team.audit_model))
+            audit_gateway = LLMGateway(other, settings.llm_max_calls)
+        result = team_run(settings, team, records, tasks, http, policy, gateway, audit_gateway)
+    report.outcomes, report.team = result.outcomes, result
+    report.llm = gateway.usage
+    if audit_gateway is not gateway:
+        for name in asdict(gateway.usage):
+            setattr(
+                report.llm, name, getattr(report.llm, name) + getattr(audit_gateway.usage, name)
+            )
+    emit(
+        "team_pass",
+        f"team pass: {result.messages} notice(s) decided, {result.undelivered} not delivered, "
+        f"run {result.replay}",
+        level=logging.ERROR if result.replay == "mismatch" else logging.INFO,
+        notices=result.messages,
+        undelivered=result.undelivered,
+        replay=result.replay,
+        artefact=result.artefact_digest,
+    )
 
 
 def make_llm(settings: Settings) -> LLMClient:

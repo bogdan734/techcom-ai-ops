@@ -6,8 +6,12 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from .rules import Policy
+
+if TYPE_CHECKING:
+    from .team.settings import TeamSettings
 
 PROVIDERS = ("stub", "anthropic")
 DEFAULT_OUT_DIR = "out"
@@ -32,6 +36,8 @@ class Settings:
     max_failed_runs: int
     approve_escalations: bool
     policy: Policy
+    run_lock: bool = True
+    team: TeamSettings | None = None
 
     @classmethod
     def from_env(cls, env: Mapping[str, str]) -> Settings:
@@ -48,8 +54,8 @@ class Settings:
                 raise ConfigError(f"{name} must not be negative")
             return value
 
-        def flag(name: str) -> bool:
-            raw = text(name, "false")
+        def flag(name: str, default: str = "false") -> bool:
+            raw = text(name, default)
             if raw.lower() not in ("true", "false", "1", "0"):
                 raise ConfigError(f"{name}={raw!r} is not true, false, 1 or 0")
             return raw.lower() in ("true", "1")
@@ -59,6 +65,9 @@ class Settings:
             raise ConfigError(f"LLM_PROVIDER={provider!r}, expected one of {PROVIDERS}")
         if provider == "anthropic" and not env.get("ANTHROPIC_API_KEY"):
             raise ConfigError("LLM_PROVIDER=anthropic needs ANTHROPIC_API_KEY")
+
+        # Imported here: the team package imports this module for ConfigError.
+        from .team.settings import TeamSettings
 
         return cls(
             today=parse_day(env.get("EVALUATION_DATE", "")),
@@ -83,6 +92,8 @@ class Settings:
                 remind_every_days=number("REMIND_EVERY_DAYS", 0, int),
                 max_reminders=number("MAX_REMINDERS", 2, int),
             ),
+            run_lock=flag("RUN_LOCK", "true"),
+            team=TeamSettings.from_env(env),
         )
 
 
