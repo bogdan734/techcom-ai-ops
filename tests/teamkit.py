@@ -88,3 +88,14 @@ class KindLLM:
         if isinstance(reply, Exception):
             raise reply
         return Completion(reply, input_tokens=100, output_tokens=20)
+
+
+def make_vault(tmp: Path, visibility: str = "issuers", names: Sequence[str] | None = None):
+    """A vault over the sample org with every file created (or just ``names``)."""
+    from followup.team.org import Org
+    from followup.team.vault import Vault
+
+    vault = Vault(tmp / "state", Org.from_records(sample_people()), visibility)
+    for name in names if names is not None else vault.known():
+        vault.create(name)
+    return vault
