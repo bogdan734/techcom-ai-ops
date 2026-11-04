@@ -104,6 +104,17 @@ CREATE TABLE IF NOT EXISTS note_readings (
 """
 
 
+# The schema of version 1 (dead letters), a literal for the same reason.
+V1_SCHEMA = SUBMITTED_SCHEMA.replace(
+    "CHECK (status IN ('pending', 'sent', 'failed'))",
+    "CHECK (status IN ('pending', 'sent', 'failed', 'dead'))",
+).replace(
+    "    attempts    INTEGER NOT NULL DEFAULT 0,\n",
+    "    attempts    INTEGER NOT NULL DEFAULT 0,\n    failures    INTEGER NOT NULL DEFAULT 0,\n",
+)
+assert "'dead'" in V1_SCHEMA and "failures" in V1_SCHEMA
+
+
 def submitted_db(path: Path) -> None:
     """A state.db as the submitted version left it: no user_version, one sent, one failed row."""
     rows = (
@@ -165,6 +176,36 @@ def test_database_from_the_submitted_version_is_migrated(tmp_path):
         assert {row[0] for row in tables} == {"actions", "note_readings"}
         store.mark_dead("failed-1", "gave up")  # the rebuilt CHECK accepts the new status
         assert store.get_action("failed-1").status == "dead"
+
+
+def test_upgrade_from_version_1_keeps_the_failure_counts(tmp_path):
+    path = tmp_path / "state.db"
+    act = action("failed-2")
+    with closing(sqlite3.connect(path)) as db:
+        db.executescript(V1_SCHEMA)
+        db.execute(
+            "INSERT INTO actions (action_id, task_id, decision, target, reason, message, "
+            "drafted_by, status, attempts, failures, last_error, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, 'failed', 4, 2, 'HTTP 503', ?, ?)",
+            (
+                act.action_id,
+                act.task_id,
+                act.decision.value,
+                act.target,
+                act.reason,
+                act.message,
+                act.drafted_by,
+                NOW,
+                NOW,
+            ),
+        )
+        db.execute("PRAGMA user_version = 1")
+        db.commit()
+
+    with closing(Store(path)) as store:
+        stored = store.get_action("failed-2")
+        assert (stored.status, stored.attempts, stored.failures) == ("failed", 4, 2)
+        assert store.db.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
 
 
 def test_failed_migration_is_rolled_back_whole(tmp_path):

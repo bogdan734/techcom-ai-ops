@@ -59,10 +59,23 @@ _ACTION_COLUMNS = (
     "status, attempts, failures, message_id, last_error"
 )
 
-# What a rebuild carries over: the columns the submitted version (schema 0) already had.
-_SUBMITTED_COLUMNS = (
-    "action_id, task_id, decision, target, reason, message, drafted_by, status, attempts, "
-    "message_id, last_error, created_at, updated_at"
+# Every column of the actions table. A rebuild carries over the ones the old table had, and the
+# others take their defaults.
+_COLUMNS = (
+    "action_id",
+    "task_id",
+    "decision",
+    "target",
+    "reason",
+    "message",
+    "drafted_by",
+    "status",
+    "attempts",
+    "failures",
+    "message_id",
+    "last_error",
+    "created_at",
+    "updated_at",
 )
 
 # SQLite cannot alter a CHECK in place, so a table from the submitted version is rebuilt. Its
@@ -71,10 +84,6 @@ _SUBMITTED_COLUMNS = (
 _RENAME_OLD_TABLE = """
 DROP INDEX IF EXISTS actions_task;
 ALTER TABLE actions RENAME TO actions_old;
-"""
-_COPY_OLD_ROWS = f"""
-INSERT INTO actions ({_SUBMITTED_COLUMNS}) SELECT {_SUBMITTED_COLUMNS} FROM actions_old;
-DROP TABLE actions_old;
 """
 
 
@@ -258,10 +267,14 @@ class Store:
 def _ensure_schema(db: sqlite3.Connection) -> None:
     if db.execute("PRAGMA user_version").fetchone()[0] >= SCHEMA_VERSION:
         return
-    has_actions = db.execute(
-        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'actions'"
-    ).fetchone()
-    before, after = (_RENAME_OLD_TABLE, _COPY_OLD_ROWS) if has_actions else ("", "")
+    before = after = ""
+    if old := {row[1] for row in db.execute("PRAGMA table_info(actions)")}:
+        shared = ", ".join(column for column in _COLUMNS if column in old)
+        before = _RENAME_OLD_TABLE
+        after = (
+            f"INSERT INTO actions ({shared}) SELECT {shared} FROM actions_old; "
+            "DROP TABLE actions_old;"
+        )
     # executescript commits an open transaction before it runs, so BEGIN and COMMIT have to be in
     # the script for the setup to be all or nothing; `with db` rolls it back if a statement fails.
     script = f"BEGIN; {before} {SCHEMA} {after} PRAGMA user_version = {SCHEMA_VERSION}; COMMIT;"
