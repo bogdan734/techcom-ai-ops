@@ -428,3 +428,10 @@ def test_dry_run_reports_an_escalation_as_awaiting_approval(gated):
     assert [o.delivery for o in report.outcomes].count("would_send") == 6
     assert report.exit_code == 0
     assert not (gated.out_dir / "state.db").exists()
+
+
+def test_dry_run_does_not_point_at_an_approval_that_does_not_exist(gated):
+    dry_run(gated)
+
+    audit = (gated.out_dir / "audit.jsonl").read_text()
+    assert "followup approve" not in audit

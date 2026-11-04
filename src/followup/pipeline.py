@@ -42,6 +42,7 @@ class RunReport:
     rejected_records: list[str] = field(default_factory=list)
     llm: Usage = field(default_factory=Usage)
     aborted: str | None = None
+    dry_run: bool = False
 
     @property
     def exit_code(self) -> int:
@@ -174,10 +175,15 @@ class FollowUpService:
             # outbox below, and a sent one is suppressed there.
             stored = self.store.claim(action, "awaiting_approval")
             if stored.status == "awaiting_approval":
+                release = (
+                    "dry run, nothing stored"
+                    if self.outbox is None
+                    else f"followup approve {outcome.action_id}"
+                )
                 emit(
                     "approval_requested",
                     f"{task.task_id}: {verdict.decision.value} -> {verdict.target}: "
-                    f"waiting for approval (followup approve {outcome.action_id})",
+                    f"waiting for approval ({release})",
                     level=logging.WARNING,
                     task_id=task.task_id,
                     action_id=outcome.action_id,
@@ -242,7 +248,7 @@ def run(
     if faults and faults.get("llm"):
         llm = FaultyLLM(llm, faults["llm"])
     policy = retry or RetryPolicy()
-    report = RunReport(uuid.uuid4().hex[:12], settings.today, llm.model)
+    report = RunReport(uuid.uuid4().hex[:12], settings.today, llm.model, dry_run=dry_run)
     out = settings.out_dir
     started = time.monotonic()
     with run_logging(out / "audit.jsonl", report.run_id):
@@ -349,10 +355,16 @@ def summarise(report: RunReport, settings: Settings, seconds: float) -> None:
         )
     waiting = [o for o in report.outcomes if o.delivery == "awaiting_approval"]
     if waiting:
+        stored_note = (
+            "a dry run stores nothing; `followup list awaiting_approval` shows what a real run "
+            "has stored"
+            if report.dry_run
+            else "review them with `followup list awaiting_approval`, release one with "
+            "`followup approve ACTION_ID`"
+        )
         emit(
             "needs_attention",
-            f"{len(waiting)} escalation(s) wait for approval; review them with "
-            "`followup list awaiting_approval`, release one with `followup approve ACTION_ID`",
+            f"{len(waiting)} escalation(s) wait for approval; {stored_note}",
             level=logging.WARNING,
             status="awaiting_approval",
             actions=[{"task_id": o.task_id, "action_id": o.action_id} for o in waiting],
