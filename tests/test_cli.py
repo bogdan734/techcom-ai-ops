@@ -122,3 +122,13 @@ def test_requeue_without_state_is_an_error_and_creates_nothing(tmp_path, capsys)
     assert code == 1
     assert f"followup: no state at {out / 'state.db'}" in capsys.readouterr().err
     assert not out.exists()  # not even the audit log: nothing was requeued
+
+
+def test_state_commands_ignore_unrelated_bad_settings(tmp_path, monkeypatch):
+    out = tmp_path / "out"
+    with closing(Store(out / "state.db")):
+        pass
+    monkeypatch.setenv("LLM_PROVIDER", "anthropic")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+    assert main(["list", "dead", "--out", str(out)]) == 0

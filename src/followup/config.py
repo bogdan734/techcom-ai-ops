@@ -10,6 +10,7 @@ from pathlib import Path
 from .rules import Policy
 
 PROVIDERS = ("stub", "anthropic")
+DEFAULT_OUT_DIR = "out"
 
 
 class ConfigError(ValueError):
@@ -55,7 +56,7 @@ class Settings:
         return cls(
             today=parse_day(env.get("EVALUATION_DATE", "")),
             tasks_file=Path(text("TASKS_FILE", "fixtures/tasks.json")),
-            out_dir=Path(text("OUT_DIR", "out")),
+            out_dir=Path(text("OUT_DIR", DEFAULT_OUT_DIR)),
             provider=provider,
             model=text("LLM_MODEL", "claude-opus-5-5"),
             llm_timeout=number("LLM_TIMEOUT_SECONDS", 30.0),

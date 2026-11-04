@@ -15,7 +15,7 @@ from textwrap import indent
 from dotenv import find_dotenv, load_dotenv
 
 from .audit import emit, run_logging
-from .config import PROVIDERS, ConfigError, Settings
+from .config import DEFAULT_OUT_DIR, PROVIDERS, ConfigError, Settings
 from .faults import ROUTES, FaultSpecError, parse_faults
 from .pipeline import run
 from .store import PARKED_STATUSES, Store
@@ -66,9 +66,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     # The .env of the directory the command runs in, not of wherever the package is installed.
     load_dotenv(find_dotenv(usecwd=True))
     try:
-        settings = _settings(args)
         if args.command != "run":
-            return _state_command(args, settings.out_dir)
+            return _state_command(args, _out_dir(args))
+        settings = _settings(args)
         faults = parse_faults(args.fault)
         report = run(settings, faults, dry_run=args.dry_run)
     except (ConfigError, FaultSpecError) as exc:
@@ -81,13 +81,18 @@ def _add_out(command: argparse.ArgumentParser) -> None:
     command.add_argument("--out", help="state and artefacts directory (env OUT_DIR, default out)")
 
 
+def _out_dir(args: argparse.Namespace) -> Path:
+    # list and requeue need the directory and nothing else, so an unrelated bad setting (a
+    # missing API key, say) cannot keep an operator from the parked actions.
+    return Path(args.out or os.environ.get("OUT_DIR") or DEFAULT_OUT_DIR)
+
+
 def _settings(args: argparse.Namespace) -> Settings:
-    # list and requeue declare --out alone, so the flags of run may be missing from args.
     overrides = {
-        "TASKS_FILE": getattr(args, "tasks", None),
+        "TASKS_FILE": args.tasks,
         "OUT_DIR": args.out,
-        "EVALUATION_DATE": getattr(args, "today", None),
-        "LLM_PROVIDER": getattr(args, "provider", None),
+        "EVALUATION_DATE": args.today,
+        "LLM_PROVIDER": args.provider,
     }
     env = {**os.environ, **{name: value for name, value in overrides.items() if value}}
     return Settings.from_env(env)
