@@ -60,8 +60,8 @@ _TEMPLATES: Mapping[Kind, str] = {
     Kind.TASK_CLOSED: "{assignee} closed {task_id} ({title}).{check}",
     Kind.NEXT_TASK: "{task_id} is closed. {next}",
     Kind.QUIZ: (
-        "Completion check for {task_id} ({title}). Answer with: "
-        "followup team answer {task_id} --as {assignee_id}\n{questions}"
+        "Completion check for {task_id} ({title}). Answer every scored question: "
+        "followup team answer {task_id} --as {assignee_id} 1 'your answer' 2 '...'\n{questions}"
     ),
     Kind.QUIZ_REMINDER: (
         "Reminder: the completion check for {task_id} ({title}) is waiting for answers."
@@ -73,11 +73,11 @@ _TEMPLATES: Mapping[Kind, str] = {
     Kind.VERDICT: "Completion check for {task_id} ({title}) by {assignee}: {verdict}.{detail}",
     Kind.NEEDS_REVIEW: (
         "The checks disagree on {task_id} ({title}) by {assignee}. Decide with: "
-        "followup team review {quiz_id} --as {issuer_id} --accept or --reject"
+        "followup team review {task_id} --as {issuer_id} --accept or --reject"
     ),
     Kind.HUMAN_REVIEW: (
         "{assignee} failed repeated completion checks, so automatic quizzes are halted. "
-        "Clear with: followup team review --clear {assignee_id} --as {reviewer_id}"
+        "Clear with: followup team clear {assignee_id} --as {reviewer_id}"
     ),
     Kind.RULES_ONLY: (
         "The model's record for {feature} ({model}) fell below the floor; "

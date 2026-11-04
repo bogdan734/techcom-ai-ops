@@ -140,21 +140,32 @@ class Grader:
         answer: str,
         item: str,
     ) -> bool | None:
-        facts = {"question": question.prompt, "quote": question.quote, "answer": answer}
-        prompt = "Grade this answer:\n" + json.dumps(facts, ensure_ascii=False)
-        # The key terms are in the request's facts for the offline stub, not in the prompt.
-        request = LLMRequest(
-            kind, system, prompt, SCHEMA, {**facts, "key_terms": question.key_terms}
-        )
-        try:
-            result = gateway.ask(request, GradeAnswer)
-        except LLMUnavailable:
+        result = ask_grade(gateway, kind, system, question, answer)
+        if result is None:
             return None
         # "Correct" has to point at words the person actually wrote.
-        grounded = not result.correct or contains_verbatim(answer, result.evidence)
+        grounded = evidence_grounded(result, answer)
         if kind == FEATURE:
             self.audit.record(FEATURE, item, "grounding", grounded)
         return result.correct if grounded else None
+
+
+def ask_grade(
+    gateway: LLMGateway, kind: str, system: str, question: Question, answer: str
+) -> GradeAnswer | None:
+    """One model opinion on one answer, or ``None`` when the model is unavailable."""
+    facts = {"question": question.prompt, "quote": question.quote, "answer": answer}
+    prompt = "Grade this answer:\n" + json.dumps(facts, ensure_ascii=False)
+    # The key terms are in the request's facts for the offline stub, not in the prompt.
+    request = LLMRequest(kind, system, prompt, SCHEMA, {**facts, "key_terms": question.key_terms})
+    try:
+        return gateway.ask(request, GradeAnswer)
+    except LLMUnavailable:
+        return None
+
+
+def evidence_grounded(result: GradeAnswer, answer: str) -> bool:
+    return not result.correct or contains_verbatim(answer, result.evidence)
 
 
 def answers_for(db: sqlite3.Connection, quiz_id: str) -> dict[str, str]:

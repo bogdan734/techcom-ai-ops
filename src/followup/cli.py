@@ -18,7 +18,9 @@ from .audit import emit, run_logging
 from .config import DEFAULT_OUT_DIR, PROVIDERS, ConfigError, Settings
 from .faults import ROUTES, FaultSpecError, parse_faults
 from .pipeline import run
+from .run_lock import EXIT_BUSY, RunBusy
 from .store import PARKED_STATUSES, Store
+from .team.cli import add_team_parser, run_team
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -36,6 +38,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_cmd.add_argument(
         "--today", help="evaluation date YYYY-MM-DD (env EVALUATION_DATE, default today in UTC)"
     )
+    run_cmd.add_argument("--org", help="switch the team layer on with this org file (env ORG_FILE)")
     run_cmd.add_argument(
         "--provider", choices=PROVIDERS, help="LLM provider (env LLM_PROVIDER, default stub)"
     )
@@ -58,6 +61,7 @@ def build_parser() -> argparse.ArgumentParser:
     requeue_cmd = commands.add_parser("requeue", help="release dead letters for the next run")
     requeue_cmd.add_argument("action_ids", nargs="+", metavar="ACTION_ID", help="see `list dead`")
     _add_out(requeue_cmd)
+    add_team_parser(commands)
     approve_cmd = commands.add_parser("approve", help="release escalations waiting for approval")
     approve_cmd.add_argument(
         "action_ids", nargs="+", metavar="ACTION_ID", help="see `list awaiting_approval`"
@@ -70,12 +74,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     # The .env of the directory the command runs in, not of wherever the package is installed.
     load_dotenv(find_dotenv(usecwd=True))
+    if args.command == "team":
+        return run_team(args)
     try:
         if args.command != "run":
             return _state_command(args, _out_dir(args))
         settings = _settings(args)
         faults = parse_faults(args.fault)
         report = run(settings, faults, dry_run=args.dry_run)
+    except RunBusy as exc:
+        print(f"followup: {exc}; another run is working in this directory", file=sys.stderr)
+        return EXIT_BUSY
     except (ConfigError, FaultSpecError) as exc:
         print(f"followup: configuration error: {exc}", file=sys.stderr)
         return 1
@@ -98,6 +107,7 @@ def _settings(args: argparse.Namespace) -> Settings:
         "OUT_DIR": args.out,
         "EVALUATION_DATE": args.today,
         "LLM_PROVIDER": args.provider,
+        "ORG_FILE": args.org,
     }
     env = {**os.environ, **{name: value for name, value in overrides.items() if value}}
     return Settings.from_env(env)
