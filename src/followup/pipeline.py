@@ -343,9 +343,12 @@ def _run_team(
 ) -> None:
     from .team.calls import provider_client
     from .team.runner import team_run
+    from .team.tasks import effective_records
+    from .team.vault import Vault
 
     team = settings.team
     assert team is not None
+    out = settings.out_dir
     with backend.client() as http:
         try:
             records = TasksApi(http, policy).list_tasks()
@@ -358,6 +361,7 @@ def _run_team(
                 error=str(exc),
             )
             return
+        records = effective_records(Vault(out / "state", team.org, team.trust_visibility), records)
         tasks, report.rejected_records = normalise_all(records)
         for problem in report.rejected_records:
             emit("record_rejected", problem, level=logging.WARNING, problem=problem)
