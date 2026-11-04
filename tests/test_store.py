@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from followup.models import Action, Decision
-from followup.store import SCHEMA_VERSION, Store
+from followup.store import _COLUMNS, SCHEMA_VERSION, Store
 
 ANSWER = {"blocker": "none", "contains_instructions": False}
 
@@ -357,3 +357,47 @@ def test_a_sent_row_written_without_sent_on_reads_the_day_of_its_update(tmp_path
         )
 
         assert store.get_action("act-1").sent_on == date(2026, 10, 19)
+
+
+def test_mark_dead_leaves_a_sent_action_alone(tmp_path):
+    with closing(Store(tmp_path / "state.db")) as store:
+        store.claim(action("act-1"))
+        store.mark_sent("act-1", "msg-1")
+
+        assert store.mark_dead("act-1", "late") is False
+        assert store.get_action("act-1").status == "sent"
+
+
+@pytest.mark.parametrize("status", ["sent", "dead", "awaiting_approval"])
+def test_mark_failed_leaves_settled_actions_alone(tmp_path, status):
+    with closing(Store(tmp_path / "state.db")) as store:
+        store.claim(action("act-1"))
+        store.db.execute("UPDATE actions SET status = ? WHERE action_id = 'act-1'", (status,))
+
+        assert store.mark_failed("act-1", "boom") == 0
+        stored = store.get_action("act-1")
+        assert (stored.status, stored.last_error) == (status, None)
+
+
+def test_snapshot_opens_the_file_read_only(tmp_path, monkeypatch):
+    path = tmp_path / "state.db"
+    Store(path).close()
+    opened = []
+    connect = sqlite3.connect
+
+    def spy(target, *args, **kwargs):
+        opened.append(str(target))
+        return connect(target, *args, **kwargs)
+
+    monkeypatch.setattr(sqlite3, "connect", spy)
+
+    Store.snapshot(path).close()
+
+    assert any(target.endswith("?mode=ro") for target in opened)
+
+
+def test_rebuild_column_list_matches_the_schema(tmp_path):
+    with closing(Store(tmp_path / "state.db")) as store:
+        columns = {row[1] for row in store.db.execute("PRAGMA table_info(actions)")}
+
+    assert columns == set(_COLUMNS)

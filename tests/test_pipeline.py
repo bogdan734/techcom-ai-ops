@@ -435,3 +435,13 @@ def test_dry_run_does_not_point_at_an_approval_that_does_not_exist(gated):
 
     audit = (gated.out_dir / "audit.jsonl").read_text()
     assert "followup approve" not in audit
+
+
+def test_a_held_task_gets_no_action_id_even_with_the_cadence_on(settings):
+    cadence_on = replace(settings, policy=replace(settings.policy, remind_every_days=2))
+
+    report = go(cadence_on, llm=ScriptedLLM(default="I think everything is fine!"))
+
+    held = [o for o in report.outcomes if o.delivery == "deferred"]
+    assert {o.task_id for o in held} == {"TC-1001", "TC-1002", "TC-1008", "TC-1009"}
+    assert [o.action_id for o in held] == [None] * 4
