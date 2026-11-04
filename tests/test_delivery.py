@@ -272,3 +272,23 @@ def test_a_rejection_after_a_concurrent_delivery_is_not_reported_as_dead(store, 
 
     assert delivery.status == "failed"
     assert store.get_action("act-1").status == "sent"
+
+
+@pytest.mark.parametrize("status", ["401", "403", "404"])
+def test_credential_and_endpoint_errors_are_failed_runs_not_rejections(store, status):
+    backend = MockBackend([], faults={"send": [status]})
+
+    delivery = parking_outbox(store, backend, 3).deliver(action())
+
+    assert delivery.status == "failed"
+    assert store.get_action("act-1").failures == 1
+
+
+@pytest.mark.parametrize("status", ["413", "422"])
+def test_a_message_the_provider_refuses_is_parked_at_once(store, status):
+    backend = MockBackend([], faults={"send": [status]})
+
+    delivery = parking_outbox(store, backend, 3).deliver(action())
+
+    assert delivery.status == "dead"
+    assert len(posts(backend)) == 1

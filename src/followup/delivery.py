@@ -16,7 +16,7 @@ from dataclasses import dataclass
 
 import httpx2
 
-from .api import RETRYABLE_STATUS, ApiError, MessagesApi, Rejected
+from .api import REJECTED_STATUS, RETRYABLE_STATUS, ApiError, MessagesApi, Rejected
 from .audit import emit
 from .models import Action
 from .retry import CircuitBreaker, RetryPolicy, parse_retry_after
@@ -137,10 +137,8 @@ class Outbox:
                 if response.status_code not in RETRYABLE_STATUS:
                     detail = response.text[:200]
                     error = f"POST /messages: HTTP {response.status_code} {detail}"
-                    # A 4xx says the message itself is wrong, so every resend would be refused too;
-                    # 408 only says the server stopped waiting, which a retry next run can fix.
-                    if 400 <= response.status_code < 500 and response.status_code != 408:
-                        raise Rejected(error, response.status_code)
+                    if response.status_code in REJECTED_STATUS:
+                        raise Rejected(error)
                     raise ApiError(error)
                 failure = f"HTTP {response.status_code}"
                 retry_after = parse_retry_after(response.headers.get("Retry-After"))

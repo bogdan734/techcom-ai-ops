@@ -17,12 +17,14 @@ class ApiError(Exception):
     """The API refused the request, or stayed unavailable after bounded retries."""
 
 
+# Statuses that blame the message itself: sending it again cannot succeed. A 401, 403 or 404
+# blames the credentials or the endpoint, which a person fixes once for every action, and a 408
+# only says the server stopped waiting. Those stay ordinary failures.
+REJECTED_STATUS = frozenset({400, 413, 422})
+
+
 class Rejected(ApiError):
     """The provider refused the message itself, so sending it again cannot succeed."""
-
-    def __init__(self, message: str, status: int):
-        super().__init__(message)
-        self.status = status
 
 
 def request_with_retries(
