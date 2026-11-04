@@ -74,13 +74,24 @@ def wilson_lower(passes: float, n: float, z: float = 1.96) -> float:
     return max(0.0, (centre - spread) / (1 + z * z / n))
 
 
-def decayed_score(events: Sequence[Event], today: date, half_life_days: int) -> float:
+def _decayed(events: Sequence[Event], today: date, half_life_days: int) -> tuple[float, float]:
+    """Decayed passes and decayed total: a result loses half its weight every half-life."""
     passes = total = 0.0
     for event in events:
         weight = 0.5 ** (max((today - event.day).days, 0) / half_life_days)
         total += weight
         passes += weight * event.passed
-    return wilson_lower(passes, total)
+    return passes, total
+
+
+def decayed_score(events: Sequence[Event], today: date, half_life_days: int) -> float:
+    return wilson_lower(*_decayed(events, today, half_life_days))
+
+
+def decayed_rate(events: Sequence[Event], today: date, half_life_days: int) -> float:
+    """Plain decayed pass rate: a model has to fail visibly to be dropped, not to prove itself."""
+    passes, total = _decayed(events, today, half_life_days)
+    return passes / total if total else 1.0
 
 
 def standing(events: Sequence[Event], today: date, rules: TeamSettings) -> Standing:
