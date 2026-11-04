@@ -21,7 +21,21 @@ an SQLite outbox with idempotency keys keeps re-runs, retries and lost responses
 
 ## 📌 In short
 
-Solution to the TechCom AI Engineer assessment. The service pulls tasks from a mock tasks API, classifies each one, drafts a message for the tasks that need one and delivers it through a mock messaging provider. On the supplied `tasks.json` (evaluation date 2026-10-21):
+Solution to the TechCom AI Engineer assessment. The service pulls tasks from a mock tasks API, classifies each one, drafts a message for the tasks that need one and delivers it through a mock messaging provider.
+
+> **Status, 2026-11-04.** The version submitted for the assessment is commit
+> [`b67e0c6`](https://github.com/bogdan734/techcom-ai-ops/commit/b67e0c69105a1d3131aa0a88e808c893a4a54385).
+> `main` adds the [opt-in hardening](#opt-in-hardening) and the [team layer](#-team-layer) on top
+> ([PR #1](https://github.com/bogdan734/techcom-ai-ops/pull/1),
+> [commits since the submission](https://github.com/bogdan734/techcom-ai-ops/compare/b67e0c6...main),
+> [changelog](CHANGELOG.md)). Both are off until switched on: with the defaults a run writes the same
+> `decisions.json`, delivery log and audit events as the submitted version, and the one visible
+> change is that `state.db` is upgraded in place. CI passes on Python 3.11, 3.12 and 3.13. The new
+> request kinds ran against the stub model and the mock providers, not a real model or a live phone
+> provider, and a task has one assignee
+> ([what is incomplete](#-what-is-incomplete-and-what-i-would-change-for-production)).
+
+On the supplied `tasks.json` (evaluation date 2026-10-21):
 
 |  | Result |
 |---|---|
@@ -855,6 +869,10 @@ audit log is append-only.
   presence of a name is reported as a question for the engineer.
 - **One check per task and spec.** A task sent back and handed in again is not asked again
   unless its spec changed, and a person who is reopened in a thread keeps the old answers.
+- **One assignee per task.** A task has one owner, and a thread has one assignee and one issuer.
+  Two people on the same task, each giving their own account, and a rule for when the accounts
+  disagree are not built. It would take a table of assignees, a check per person and a way to
+  settle a split between them.
 - **Status moves stay here.** Accept, hand in and send back are events over the tasks API; a
   tracker integration has to send them on.
 - **Voice is a delivery channel, not a speech engine.** The service sends the words and the
