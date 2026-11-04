@@ -142,8 +142,12 @@ class Grader:
     ) -> bool | None:
         facts = {"question": question.prompt, "quote": question.quote, "answer": answer}
         prompt = "Grade this answer:\n" + json.dumps(facts, ensure_ascii=False)
+        # The key terms are in the request's facts for the offline stub, not in the prompt.
+        request = LLMRequest(
+            kind, system, prompt, SCHEMA, {**facts, "key_terms": question.key_terms}
+        )
         try:
-            result = gateway.ask(LLMRequest(kind, system, prompt, SCHEMA, facts), GradeAnswer)
+            result = gateway.ask(request, GradeAnswer)
         except LLMUnavailable:
             return None
         # "Correct" has to point at words the person actually wrote.

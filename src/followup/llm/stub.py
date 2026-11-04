@@ -26,6 +26,13 @@ _DEPENDENCY = re.compile(
 )
 
 
+def _team_kinds() -> frozenset[str]:
+    # Imported on use: the team layer is optional and imports this package, not the other way.
+    from ..team.stub_answers import TEAM_KINDS
+
+    return TEAM_KINDS
+
+
 class StubClient:
     model = "stub"
 
@@ -34,6 +41,10 @@ class StubClient:
             answer = read_note(request.facts["note"])
         elif request.kind == "draft_message":
             answer = {"message": render_message(request.facts)}
+        elif request.kind in _team_kinds():
+            from ..team.stub_answers import answer as team_answer
+
+            answer = team_answer(request)
         else:
             raise LLMError(f"the stub cannot answer {request.kind!r}", fatal=True)
         return Completion(json.dumps(answer))
