@@ -102,6 +102,8 @@ class Message:
     channel: Channel
     state_key: str
     facts: Mapping[str, str] = field(default_factory=dict)
+    # The message that has to be sent first (a reminder waits for its quiz); not part of the id.
+    after: str | None = None
 
     def __post_init__(self) -> None:
         missing = _REQUIRED[self.kind] - set(self.facts)

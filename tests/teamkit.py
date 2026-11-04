@@ -58,6 +58,7 @@ def sample_people() -> list[dict[str, Any]]:
 
 
 def write_org(tmp: Path, people: Sequence[Mapping[str, Any]] | None = None) -> Path:
+    tmp.mkdir(parents=True, exist_ok=True)
     path = tmp / "org.json"
     path.write_text(json.dumps({"people": list(people or sample_people())}), encoding="utf-8")
     return path
