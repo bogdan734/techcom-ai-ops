@@ -117,14 +117,14 @@ class Store:
         _ensure_schema(self.db)
 
     @classmethod
-    def snapshot(cls, path: Path, today: date | None = None) -> Store:
+    def snapshot(cls, path: Path) -> Store:
         """An in-memory copy of the state at ``path``, for a dry run: every write stays in it.
 
         The file is opened with ``mode=ro``, which SQLite enforces itself, copied and closed.
         A missing file gives an empty store, and neither the file nor its directory is created.
         """
         store = cls.__new__(cls)  # not __init__: it would create the directory and the file
-        store.today = today or datetime.now(UTC).date()
+        store.today = datetime.now(UTC).date()
         store.db = sqlite3.connect(":memory:", isolation_level=None)
         if path.exists():
             # as_uri escapes '#', '?' and spaces; "file:" + path would open a different file.

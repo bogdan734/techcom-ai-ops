@@ -265,7 +265,7 @@ def run(
             load_fixture(settings.tasks_file), out / "delivery_log.jsonl", faults=faults
         )
         state = out / "state.db"
-        store = Store.snapshot(state, settings.today) if dry_run else Store(state, settings.today)
+        store = Store.snapshot(state) if dry_run else Store(state, settings.today)
         try:
             with backend.client() as http:
                 try:
