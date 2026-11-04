@@ -89,19 +89,19 @@ class TasksApi:
 
 
 class MessagesApi:
+    PATH = "/messages"
+
     def __init__(self, http: httpx2.Client, policy: RetryPolicy):
         self.http = http
         self.policy = policy
 
     def post(self, idempotency_key: str, payload: dict[str, Any]) -> httpx2.Response:
         """Exactly one attempt: a lost response is ambiguous, so the outbox owns retries."""
-        return self.http.post(
-            "/messages", json=payload, headers={"Idempotency-Key": idempotency_key}
-        )
+        return self.http.post(self.PATH, json=payload, headers={"Idempotency-Key": idempotency_key})
 
     def find(self, idempotency_key: str) -> dict[str, Any] | None:
         """The message sent under this key, or None if the provider never committed it."""
-        url = f"/messages/{idempotency_key}"
+        url = f"{self.PATH}/{idempotency_key}"
         response = request_with_retries(self.http, self.policy, "GET", url)
         if response.status_code == 404:
             return None

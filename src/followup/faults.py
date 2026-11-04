@@ -15,7 +15,16 @@ from .llm import Completion, LLMClient, LLMError, LLMRequest
 
 HTTP_FAULTS = frozenset({"429", "500", "502", "503", "504", "timeout", "timeout-after-commit"})
 LLM_FAULTS = frozenset({"garbage", "error"})
-ROUTES = {"tasks": HTTP_FAULTS, "send": HTTP_FAULTS, "lookup": HTTP_FAULTS, "llm": LLM_FAULTS}
+# A call that connects can still reach a machine or nobody: outcomes, not HTTP failures.
+CALL_FAULTS = HTTP_FAULTS | {"machine", "no-answer"}
+ROUTES = {
+    "tasks": HTTP_FAULTS,
+    "send": HTTP_FAULTS,
+    "lookup": HTTP_FAULTS,
+    "call": CALL_FAULTS,
+    "call_lookup": HTTP_FAULTS,
+    "llm": LLM_FAULTS,
+}
 _REPEAT = re.compile(r"^(?P<name>.+?)x(?P<times>\d+)$")
 
 
