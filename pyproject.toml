@@ -26,6 +26,9 @@ followup = "followup.cli:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+"followup.team" = ["ui/*"]
+
 [tool.ruff]
 line-length = 100
 target-version = "py311"

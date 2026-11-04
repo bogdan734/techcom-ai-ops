@@ -1,10 +1,11 @@
-"""The app: a local web interface over the same functions as the console.
+"""The app: a local web interface where each person signs in to their own account.
 
 It binds to 127.0.0.1, answers only requests addressed to a local host name, and takes changes
-only as JSON with a custom header, so a page on another origin cannot drive it. The person at
-the top is chosen, not authenticated; the README says what a real deployment puts in front.
-With a scenario file the app steps through a few days at the push of a button, which is how a
-reviewer sees the layer work without a scheduler.
+only as JSON with a custom header from a page of its own origin, so a page elsewhere cannot drive
+it. Who is acting always comes from the session cookie and never from the request, so a person
+cannot become someone else by changing a name. A voice provider's webhook is the one door with
+another kind of key: a shared secret. With a scenario file the app steps through a few days at the
+push of a button, which is how a reviewer sees the layer work without a scheduler.
 """
 
 from __future__ import annotations
@@ -16,7 +17,8 @@ import shutil
 import threading
 import webbrowser
 from dataclasses import replace
-from datetime import date
+from datetime import UTC, date, datetime
+from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -24,21 +26,26 @@ from urllib.parse import parse_qs, urlparse
 
 from followup.config import ConfigError, Settings
 from followup.faults import parse_faults
-from followup.pipeline import run
+from followup.llm import LLMGateway
+from followup.pipeline import make_llm, run
 from followup.run_lock import RunBusy, hold_run_lock
 
-from . import actions
+from . import accounts, actions
+from .brief import structure
 from .calls import AnsweredBy, settle_result
 from .context import ActionError, Context, load_context, read_all
 from .dashboard import build_dashboard
-from .org import Role
-from .vault import VaultError
+from .org import Capability, Person, Role
+from .schema import CONTROL
+from .vault import Vault, VaultError
 
 UI = Path(__file__).with_name("ui") / "index.html"
 MAX_BODY = 64 * 1024
 PROGRESS = "app-progress.json"
 WEBHOOK = "/api/webhooks/call"
+COOKIE = "fd_session"
 CSP = "default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:"
+DEMO_PASSWORD = "demo-{id}-pass"
 
 
 class Day:
@@ -48,21 +55,33 @@ class Day:
         self.label = raw.get("label", raw["date"])
         self.title = raw.get("title", "")
         self.note = raw.get("note", "")
+        self.translations = {k: v for k, v in raw.items() if k.startswith(("title_", "note_"))}
         self.faults = list(raw.get("faults", []))
 
 
 class AppState:
     """Where the demo is: which days have run, and the settings for the day on screen."""
 
-    def __init__(self, settings: Settings, scenario: Path | None) -> None:
+    def __init__(
+        self, settings: Settings, scenario: Path | None, demo_logins: dict[str, str] | None = None
+    ) -> None:
         self.base = settings
         self.title = ""
         self.days: list[Day] = []
+        self.demo_logins = demo_logins or {}
+        self.guard = threading.Lock()
+        self._gateway: LLMGateway | None = None
         if scenario is not None:
             raw = json.loads(scenario.read_text(encoding="utf-8"))
             self.title = raw.get("title", "")
             self.days = [Day(d, scenario.parent) for d in raw["days"]]
-        self.guard = threading.Lock()
+
+    @property
+    def gateway(self) -> LLMGateway:
+        """One model gateway for the assistant's instant answers, made when first needed."""
+        if self._gateway is None:
+            self._gateway = LLMGateway(make_llm(self.base), self.base.llm_max_calls)
+        return self._gateway
 
     @property
     def done(self) -> int:
@@ -85,7 +104,6 @@ class AppState:
             "title": self.title,
             "done": done,
             "today": self.settings().today.isoformat(),
-            "trust_visibility": self.base.team.trust_visibility if self.base.team else "hidden",
             "days": [
                 {
                     "label": d.label,
@@ -93,6 +111,7 @@ class AppState:
                     "note": d.note,
                     "date": d.date.isoformat(),
                     "done": i < done,
+                    **d.translations,
                 }
                 for i, d in enumerate(self.days)
             ],
@@ -131,17 +150,46 @@ def make_server(state: AppState, host: str = "127.0.0.1", port: int = 0) -> Thre
     return server
 
 
+def prepare(settings: Settings, demo: bool) -> dict[str, str]:
+    """Create every database file, and in demo mode an account per person with a known password."""
+    team = settings.team
+    assert team is not None
+    vault = Vault(settings.out_dir / "state", team.org, team.trust_visibility)
+    for name in vault.known():
+        vault.ensure(name)
+    shown: dict[str, str] = {}
+    if demo:
+        db = vault.open(CONTROL)
+        try:
+            for person in team.org.people:
+                if person.role in (Role.PROJECT_MANAGER, Role.WAREHOUSE):
+                    continue
+                password = DEMO_PASSWORD.format(id=person.id)
+                if person.id not in accounts.accounts(db):
+                    accounts.set_password(db, person.id, password, settings.today)
+                shown[person.id] = password
+        finally:
+            db.close()
+    return shown
+
+
 def serve_app(settings: Settings, args: argparse.Namespace) -> int:
     if settings.team is None:
         raise ConfigError("no org file: set ORG_FILE or pass --org")
     if args.host not in ("127.0.0.1", "localhost", "::1"):
-        raise ConfigError("the app has no sign-in: it only listens on this computer")
+        raise ConfigError("the app only listens on this computer; put a reverse proxy in front")
     if args.fresh:
         shutil.rmtree(settings.out_dir, ignore_errors=True)
+    shown = prepare(settings, args.demo_logins)
     scenario = Path(args.scenario) if args.scenario else None
-    server = make_server(AppState(settings, scenario), args.host, args.port)
+    server = make_server(AppState(settings, scenario, shown), args.host, args.port)
     url = f"http://127.0.0.1:{server.server_port}/"
     print(f"followup app on {url}  (Ctrl-C to stop)")
+    if shown:
+        print(
+            "DEMO LOGINS ARE ON: each account's password is demo-<id>-pass, "
+            "shown on the sign-in page"
+        )
     if not args.no_open:
         webbrowser.open(url)
     try:
@@ -153,6 +201,14 @@ def serve_app(settings: Settings, args: argparse.Namespace) -> int:
     return 0
 
 
+class _NotFound(Exception):
+    pass
+
+
+class _Unauthorized(Exception):
+    pass
+
+
 class _Handler(BaseHTTPRequestHandler):
     app: AppState
     hosts: set[str]
@@ -161,8 +217,6 @@ class _Handler(BaseHTTPRequestHandler):
     def log_message(self, format: str, *args: Any) -> None:  # noqa: A002 - quiet by default
         return
 
-    # -- routing ------------------------------------------------------------------------
-
     def do_GET(self) -> None:  # noqa: N802
         self._handle(post=False)
 
@@ -170,87 +224,170 @@ class _Handler(BaseHTTPRequestHandler):
         self._handle(post=True)
 
     def _handle(self, post: bool) -> None:
+        self._cookie_out: str | None = None
         try:
-            if post and urlparse(self.path).path == WEBHOOK:
+            path = urlparse(self.path).path
+            if post and path == WEBHOOK:
                 # A provider calls this from outside: the shared secret stands in for the
                 # local-only checks below.
                 return self._json(200, self._webhook(self._body()))
             if self.headers.get("Host", "") not in self.hosts:
                 return self._json(403, {"error": "this app answers only on its own address"})
-            url = urlparse(self.path)
-            if not post and url.path == "/":
+            if not post and path == "/":
                 return self._file()
-            if post and (
-                self.headers.get("X-Followup") != "1"
-                or "application/json" not in self.headers.get("Content-Type", "")
-            ):
+            if post and not self._same_origin():
                 return self._json(403, {"error": "changes need the app's own request header"})
             body = self._body() if post else {}
-            query = {k: v[0] for k, v in parse_qs(url.query).items()}
-            return self._json(200, self._route(url.path, query, body, post))
-        except ActionError as exc:
+            query = {k: v[0] for k, v in parse_qs(urlparse(self.path).query).items()}
+            return self._json(200, self._route(path, query, body, post))
+        except _Unauthorized:
+            self._json(401, {"error": "sign in first"})
+        except (
+            ActionError,
+            ConfigError,
+            VaultError,
+            KeyError,
+            ValueError,
+            accounts.AuthError,
+        ) as exc:
             self._json(400, {"error": str(exc)})
         except PermissionError as exc:
             self._json(403, {"error": str(exc)})
         except RunBusy:
             self._json(503, {"error": "a run is working right now; try again in a moment"})
-        except (ConfigError, VaultError, KeyError, ValueError) as exc:
-            self._json(400, {"error": str(exc)})
         except _NotFound:
             self._json(404, {"error": "no such page"})
 
+    def _same_origin(self) -> bool:
+        origin = self.headers.get("Origin")
+        local = origin is None or origin in {f"http://{h}" for h in self.hosts}
+        return (
+            local
+            and self.headers.get("X-Followup") == "1"
+            and "application/json" in self.headers.get("Content-Type", "")
+        )
+
+    # -- routing ------------------------------------------------------------------------
+
     def _route(self, path: str, query: dict, body: dict, post: bool) -> Any:
+        if post and path == "/api/login":
+            return self._login(body)
+        if not post and path == "/api/demo":
+            return [{"id": i, "password": p} for i, p in self.app.demo_logins.items()]
+        if not post and path == "/api/session":
+            try:
+                viewer = self._viewer()
+            except _Unauthorized:
+                return {"person": None}  # not an error: the page asks this to decide what to show
+            return {"person": _person(viewer), "scenario": self.app.describe()}
+        viewer = self._viewer()
+        if post and path == "/api/logout":
+            self._with_control(lambda db: accounts.end_session(db, self._token()))
+            self._cookie_out = f"{COOKIE}=; Max-Age=0; Path=/; HttpOnly; SameSite=Strict"
+            return {"ok": True}
         if not post:
-            if path == "/api/state":
-                return self.app.describe()
-            if path == "/api/people":
-                return self._people()
-            if path == "/api/me":
-                ctx = self._context()
-                return build_dashboard(ctx, ctx.person(query.get("as", ""))).to_dict()
-            raise _NotFound
+            return self._read(path, viewer)
         if path == "/api/advance":
+            if not self._context().org.can(viewer.id, Capability.ISSUE_TASKS):
+                raise PermissionError("only a manager can move the days along")
             return self.app.advance()
+        if path == "/api/assist/spec":
+            role = self._context().org.find(str(body.get("assignee", "")))
+            return structure(
+                str(body.get("spec", "")),
+                role.role.value if role else None,
+                str(body.get("due", "")),
+            ).to_dict()
         ctx = self._context()
-        viewer = ctx.person(str(body.get("as", "")))
         with hold_run_lock(ctx.settings.out_dir, ctx.settings.run_lock):
             return self._act(path, ctx, viewer, body)
 
-    def _act(self, path: str, ctx: Context, viewer: Any, body: dict) -> dict[str, Any]:
-        if path == "/api/answer":
-            answers = {int(n): str(t) for n, t in dict(body.get("answers", {})).items()}
-            return {
-                "recorded": actions.submit_answers(ctx, viewer, str(body.get("task", "")), answers)
-            }
-        if path == "/api/review":
-            actions.review(
-                ctx,
-                viewer,
-                str(body.get("task", "")),
-                bool(body.get("accept")),
-                str(body.get("note", "")),
-            )
-            return {"ok": True}
-        if path == "/api/clear":
-            actions.clear(ctx, viewer, str(body.get("person", "")))
-            return {"ok": True}
-        if path == "/api/chat":
-            return {
-                "thread": actions.say(
-                    ctx, viewer, str(body.get("task", "")), str(body.get("text", ""))
-                )
-            }
-        if path == "/api/reply":
-            actions.reply(ctx, viewer, str(body.get("thread", "")), str(body.get("text", "")))
-            return {"ok": True}
-        if path == "/api/done":
-            actions.finish(ctx, viewer, str(body.get("thread", "")))
-            return {"ok": True}
-        if path == "/api/ticket":
-            return {"thread": actions.open_ticket(ctx, viewer, str(body.get("text", "")))}
+    def _read(self, path: str, viewer: Person) -> Any:
+        if path == "/api/me":
+            return build_dashboard(self._context(), viewer).to_dict()
         raise _NotFound
 
-    # -- helpers ------------------------------------------------------------------------
+    def _act(self, path: str, ctx: Context, viewer: Person, body: dict) -> dict[str, Any]:
+        text = lambda name: str(body.get(name, ""))  # noqa: E731
+        if path == "/api/answer":
+            answers = {int(n): str(t) for n, t in dict(body.get("answers", {})).items()}
+            return {"recorded": actions.submit_answers(ctx, viewer, text("task"), answers)}
+        if path == "/api/review":
+            actions.review(ctx, viewer, text("task"), bool(body.get("accept")), text("note"))
+        elif path == "/api/clear":
+            actions.clear(ctx, viewer, text("person"))
+        elif path == "/api/chat":
+            thread = actions.say(ctx, viewer, text("task"), text("text"))
+            actions.assist_now(ctx, thread, self.app.gateway)
+            return {"thread": thread}
+        elif path == "/api/reply":
+            actions.reply(ctx, viewer, text("thread"), text("text"))
+        elif path == "/api/done":
+            actions.finish(ctx, viewer, text("thread"))
+        elif path == "/api/ticket":
+            return {"thread": actions.open_ticket(ctx, viewer, text("text"))}
+        elif path == "/api/task/new":
+            task = actions.create_task(
+                ctx,
+                viewer,
+                title=text("title"),
+                assignee_id=text("assignee"),
+                spec=text("spec"),
+                project=text("project") or "General",
+                due=text("due"),
+            )
+            return {"task": task}
+        elif path == "/api/task/accept":
+            actions.accept_task(ctx, viewer, text("task"))
+        elif path == "/api/task/submit":
+            actions.submit_task(ctx, viewer, text("task"), text("note"))
+        elif path == "/api/task/return":
+            actions.return_task(ctx, viewer, text("task"), text("note"))
+        else:
+            raise _NotFound
+        return {"ok": True}
+
+    # -- accounts -----------------------------------------------------------------------
+
+    def _login(self, body: dict) -> dict[str, Any]:
+        person, password = str(body.get("person", "")).strip(), str(body.get("password", ""))
+        ctx = self._context()
+        found = ctx.org.find(person)
+        now = datetime.now(UTC)
+        db = ctx.vault.open(CONTROL)
+        try:
+            if found is None or not accounts.verify(db, found.id, password, now):
+                raise PermissionError("wrong id or password")
+            token = accounts.start_session(db, found.id, now)
+        finally:
+            db.close()
+        seconds = int(accounts.SESSION_FOR.total_seconds())
+        self._cookie_out = f"{COOKIE}={token}; Max-Age={seconds}; Path=/; HttpOnly; SameSite=Strict"
+        return {"person": _person(found)}
+
+    def _token(self) -> str:
+        jar: SimpleCookie = SimpleCookie(self.headers.get("Cookie", ""))
+        return jar[COOKIE].value if COOKIE in jar else ""
+
+    def _viewer(self) -> Person:
+        ctx = self._context()
+        db = ctx.vault.open(CONTROL)
+        try:
+            who = accounts.session_person(db, self._token(), datetime.now(UTC))
+        finally:
+            db.close()
+        if who is None:
+            raise _Unauthorized
+        return ctx.org.person(who)
+
+    def _with_control(self, work: Any) -> None:
+        db = self._context().vault.open(CONTROL)
+        try:
+            work(db)
+        finally:
+            db.close()
+
+    # -- the voice provider's door --------------------------------------------------------
 
     def _webhook(self, body: dict) -> dict[str, Any]:
         """A voice provider reports how a call ended, and what the person answered."""
@@ -300,16 +437,10 @@ class _Handler(BaseHTTPRequestHandler):
                 recorded = actions.submit_answers(ctx, ctx.person(person_id), task_id, answers)
         return {"ok": True, "recorded": recorded}
 
+    # -- helpers ------------------------------------------------------------------------
+
     def _context(self) -> Context:
         return load_context(self.app.settings())
-
-    def _people(self) -> list[dict[str, str]]:
-        org = self._context().org
-        return [
-            {"id": p.id, "name": p.name, "role": p.role.value, "department": p.department}
-            for p in org.people
-            if p.role not in (Role.PROJECT_MANAGER, Role.WAREHOUSE)
-        ]
 
     def _body(self) -> dict:
         length = int(self.headers.get("Content-Length", "0"))
@@ -326,6 +457,8 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(raw)))
         self.send_header("Cache-Control", "no-store")
+        if self._cookie_out:
+            self.send_header("Set-Cookie", self._cookie_out)
         self.end_headers()
         self.wfile.write(raw)
 
@@ -336,10 +469,16 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(raw)))
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
         self.send_header("Content-Security-Policy", CSP)
         self.end_headers()
         self.wfile.write(raw)
 
 
-class _NotFound(Exception):
-    pass
+def _person(person: Person) -> dict[str, str]:
+    return {
+        "id": person.id,
+        "name": person.name,
+        "role": person.role.value,
+        "department": person.department,
+    }

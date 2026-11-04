@@ -22,10 +22,11 @@ from . import actions
 from .cli_db import add_db_parser, run_db
 from .context import ActionError, Context, load_context
 from .dashboard import build_dashboard, explain, to_markdown
+from .schema import CONTROL
 from .vault import VaultError
 
 EXIT_BUSY = 75
-_WRITING = frozenset({"answer", "review", "clear", "reply", "done"})
+_WRITING = frozenset({"answer", "review", "clear", "reply", "done", "users"})
 
 
 def add_team_parser(commands: argparse._SubParsersAction) -> None:
@@ -86,6 +87,15 @@ def add_team_parser(commands: argparse._SubParsersAction) -> None:
     serve.add_argument("--scenario", metavar="FILE", help="days to step through in the app")
     serve.add_argument("--no-open", action="store_true", help="do not open a browser")
     serve.add_argument("--fresh", action="store_true", help="start from an empty state directory")
+    serve.add_argument(
+        "--demo-logins",
+        action="store_true",
+        help="give everyone the password demo-<id>-pass and show them on the sign-in page",
+    )
+    users = command("users", "accounts for the app: add, list, remove, demo", who=False)
+    users.add_argument("action", choices=["add", "list", "remove", "demo"])
+    users.add_argument("person", nargs="?", metavar="PERSON")
+    users.add_argument("--password-stdin", action="store_true", help="read the password from stdin")
     add_db_parser(sub)
 
 
@@ -240,6 +250,53 @@ def _support(ctx: Context, args: argparse.Namespace) -> int:
     return 0
 
 
+def _users(ctx: Context, args: argparse.Namespace) -> int:
+    from . import accounts
+
+    ctx.vault.ensure(CONTROL)
+    db = ctx.vault.open(CONTROL)
+    try:
+        if args.action == "list":
+            for pid in accounts.accounts(db):
+                print(f"{pid:<12} {ctx.org.person(pid).name}")
+            return 0
+        if args.action == "demo":
+            for person in ctx.org.people:
+                if person.role.value in ("project_manager", "warehouse"):
+                    continue
+                accounts.set_password(db, person.id, f"demo-{person.id}-pass", ctx.today)
+                print(f"{person.id:<12} demo-{person.id}-pass")
+            print("demo passwords are public by design; use `users add` for real accounts")
+            return 0
+        if not args.person:
+            raise ActionError("name the person")
+        person = ctx.person(args.person)
+        if args.action == "remove":
+            if not accounts.remove(db, person.id):
+                raise ActionError(f"{person.id} has no account")
+            print(f"removed the account of {person.id}")
+            return 0
+        password = _password(args.password_stdin)
+        accounts.set_password(db, person.id, password, ctx.today)
+        print(f"account set for {person.id}")
+        return 0
+    except accounts.AuthError as exc:
+        raise ActionError(str(exc)) from exc
+    finally:
+        db.close()
+
+
+def _password(from_stdin: bool) -> str:
+    import getpass
+
+    if from_stdin:
+        return sys.stdin.readline().rstrip("\n")
+    first, again = getpass.getpass("password: "), getpass.getpass("again: ")
+    if first != again:
+        raise ActionError("the two passwords differ")
+    return first
+
+
 def _calibrate(ctx: Context, args: argparse.Namespace) -> int:
     from .calibrate_cli import run_calibration
 
@@ -267,6 +324,7 @@ _HANDLERS: dict[str, Callable[[Context, argparse.Namespace], int]] = {
     "reply": _reply,
     "done": _done,
     "support": _support,
+    "users": _users,
     "calibrate": _calibrate,
     "report": _report,
 }

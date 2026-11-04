@@ -6,21 +6,33 @@
       "tasks": "tasks-d1.json",
       "label": "Day 1",
       "title": "The layer starts",
-      "note": "The first run only records what exists, so nothing old is announced. TC-1007 was created yesterday, so its assignee hears about it."
+      "note": "The first run only records what exists, so nothing old is announced. TC-1007 was created yesterday, so its assignee hears about it.",
+      "title_ru": "Слой стартует",
+      "note_ru": "Первый запуск только запоминает, что есть, поэтому старое не объявляется. TC-1007 создана вчера, и её исполнитель узнаёт о ней.",
+      "title_uk": "Шар стартує",
+      "note_uk": "Перший запуск лише запам'ятовує, що є, тому старе не оголошується. TC-1007 створено вчора, і її виконавець дізнається про неї."
     },
     {
       "date": "2026-10-22",
       "tasks": "tasks-d2.json",
       "label": "Day 2",
       "title": "Two tasks close",
-      "note": "John and Alex close their tasks. Each gets a completion check, the issuer hears at once, and the next open task is named. A new task appears and one spec changes."
+      "note": "John and Alex close their tasks. Each gets a completion check, the issuer hears at once, and the next open task is named. A new task appears and one spec changes.",
+      "title_ru": "Две задачи закрыты",
+      "note_ru": "Джон и Алекс закрывают задачи. Каждому выдаётся проверка, выдавший узнаёт сразу, называется следующая задача. Появляется новая задача, и меняется одно ТЗ.",
+      "title_uk": "Два завдання закрито",
+      "note_uk": "Джон і Алекс закривають завдання. Кожен отримує перевірку, той, хто видав, дізнається одразу, називається наступне завдання. З'являється нове завдання, і змінюється одне ТЗ."
     },
     {
       "date": "2026-10-23",
       "tasks": "tasks-d2.json",
       "label": "Day 3",
       "title": "Answers and questions",
-      "note": "Answer a check, ask a question in a task thread, or open a support ticket, then advance the day. John has not answered, so he gets a reminder."
+      "note": "Answer a check, ask a question in a task thread, or open a support ticket, then advance the day. John has not answered, so he gets a reminder.",
+      "title_ru": "Ответы и вопросы",
+      "note_ru": "Ответьте на проверку, задайте вопрос в задаче или откройте обращение в поддержку, затем переведите день. Джон не ответил, поэтому ему придёт напоминание.",
+      "title_uk": "Відповіді та питання",
+      "note_uk": "Дайте відповідь на перевірку, поставте питання в завданні або відкрийте звернення до підтримки, потім переведіть день. Джон не відповів, тому йому прийде нагадування."
     },
     {
       "date": "2026-10-24",
@@ -30,14 +42,22 @@
       "note": "A doubtful grade waits for the issuer. A check that stays unanswered for two days becomes a phone call; here nobody picks up.",
       "faults": [
         "call=no-answer"
-      ]
+      ],
+      "title_ru": "Решения и звонок",
+      "note_ru": "Сомнительная оценка ждёт выдавшего. Проверка без ответа два дня становится телефонным звонком; здесь трубку никто не берёт.",
+      "title_uk": "Рішення і дзвінок",
+      "note_uk": "Сумнівна оцінка чекає того, хто видав. Перевірка без відповіді два дні стає телефонним дзвінком; тут слухавку ніхто не бере."
     },
     {
       "date": "2026-10-25",
       "tasks": "tasks-d2.json",
       "label": "Day 5",
       "title": "The loop closes",
-      "note": "The issuer hears that the call went unanswered. Running a day twice sends nothing twice."
+      "note": "The issuer hears that the call went unanswered. Running a day twice sends nothing twice.",
+      "title_ru": "Круг замкнулся",
+      "note_ru": "Выдавший узнаёт, что на звонок не ответили. Повторный запуск того же дня ничего не отправляет второй раз.",
+      "title_uk": "Коло замкнулося",
+      "note_uk": "Той, хто видав, дізнається, що на дзвінок не відповіли. Повторний запуск того ж дня нічого не надсилає вдруге."
     }
   ]
 }

@@ -149,6 +149,7 @@ def build_dashboard(ctx: Context, viewer: Person) -> Dashboard:
             "name": viewer.name,
             "role": viewer.role.value,
             "department": viewer.department,
+            "issuer": "yes" if issuer_capable else "",
         },
         today=ctx.today.isoformat(),
         mine=tuple(mine),

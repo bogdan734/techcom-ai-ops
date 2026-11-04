@@ -212,3 +212,30 @@ def test_answer_all_and_pairs_together_are_refused(state, capsys):
     assert team(state, "answer", "TC-1", "--as", "eve", "--answer", "1=x", "--all", "y") == 1
     assert "either --all" in capsys.readouterr().err
     assert team(state, "answer", "TC-1", "--as", "eve") == 1
+
+
+def test_users_add_list_remove_and_a_short_password(state, capsys, monkeypatch):
+    import io
+
+    def users(*args, password=None):
+        if password is not None:
+            monkeypatch.setattr("sys.stdin", io.StringIO(password + "\n"))
+        return team(state, "users", *args, today="2026-10-22")
+
+    assert users("add", "eve", "--password-stdin", password="short") == 1
+    assert "at least 8" in capsys.readouterr().err
+    assert users("add", "eve", "--password-stdin", password="a long enough one") == 0
+    assert users("add", "warehouse", "--password-stdin", password="a long enough one") == 1
+    capsys.readouterr()
+    assert users("list") == 0 and "eve" in capsys.readouterr().out
+    assert users("remove", "eve") == 0
+    assert users("remove", "eve") == 1
+    assert users("add", "--password-stdin", password="x") == 1
+
+
+def test_users_demo_creates_an_account_for_everyone_who_can_act(state, capsys):
+    assert team(state, "users", "demo", today="2026-10-22") == 0
+    out = capsys.readouterr().out
+    assert (
+        "eve          demo-eve-pass" in out and "warehouse" not in out and "public by design" in out
+    )
