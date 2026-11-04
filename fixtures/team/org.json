@@ -1,0 +1,126 @@
+{
+  "people": [
+    {
+      "id": "rhea",
+      "name": "Rhea Okafor",
+      "role": "boss",
+      "department": "management"
+    },
+    {
+      "id": "sam",
+      "name": "Samir Haddad",
+      "role": "senior_manager",
+      "department": "management",
+      "reports_to": "rhea"
+    },
+    {
+      "id": "mia",
+      "name": "Mia Lindqvist",
+      "role": "manager",
+      "department": "management",
+      "reports_to": "sam"
+    },
+    {
+      "id": "noah",
+      "name": "Noah Becker",
+      "role": "manager",
+      "department": "management",
+      "reports_to": "sam"
+    },
+    {
+      "id": "pm",
+      "name": "Priya Nair",
+      "role": "project_manager",
+      "department": "management",
+      "reports_to": "sam"
+    },
+    {
+      "id": "wh",
+      "name": "Wes Holt",
+      "role": "warehouse",
+      "department": "warehouse",
+      "reports_to": "sam"
+    },
+    {
+      "id": "john",
+      "name": "John Smith",
+      "role": "field",
+      "department": "field-ops",
+      "reports_to": "mia",
+      "phone": "+15551110001",
+      "call_consent": true
+    },
+    {
+      "id": "maria",
+      "name": "Maria Cruz",
+      "role": "field",
+      "department": "field-ops",
+      "reports_to": "mia"
+    },
+    {
+      "id": "lee",
+      "name": "Lee Nguyen",
+      "role": "field",
+      "department": "field-ops",
+      "reports_to": "mia"
+    },
+    {
+      "id": "jamie",
+      "name": "Jamie Lee",
+      "role": "field",
+      "department": "field-ops",
+      "reports_to": "mia"
+    },
+    {
+      "id": "taylor",
+      "name": "Taylor Reed",
+      "role": "field",
+      "department": "field-ops",
+      "reports_to": "mia"
+    },
+    {
+      "id": "morgan",
+      "name": "Morgan Bell",
+      "role": "field",
+      "department": "field-ops",
+      "reports_to": "mia"
+    },
+    {
+      "id": "dana",
+      "name": "Dana Fox",
+      "role": "field",
+      "department": "field-ops",
+      "reports_to": "mia"
+    },
+    {
+      "id": "alex",
+      "name": "Alex Brown",
+      "role": "engineer",
+      "department": "engineering",
+      "reports_to": "noah",
+      "phone": "+15551110002",
+      "call_consent": true
+    },
+    {
+      "id": "chris",
+      "name": "Chris Patel",
+      "role": "engineer",
+      "department": "engineering",
+      "reports_to": "noah"
+    },
+    {
+      "id": "sue",
+      "name": "Sue Park",
+      "role": "support",
+      "department": "support",
+      "reports_to": "sam"
+    },
+    {
+      "id": "tom",
+      "name": "Tom Alvarez",
+      "role": "support",
+      "department": "support",
+      "reports_to": "sam"
+    }
+  ]
+}

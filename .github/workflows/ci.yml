@@ -34,3 +34,5 @@ jobs:
             test "$(wc -l < "$log")" -eq 7
             test "$(cut -d'"' -f8 "$log" | sort -u | wc -l)" -eq 7
           done
+      - name: Team layer walkthrough, with its own checks
+        run: make team-demo

@@ -49,8 +49,13 @@ def add_team_parser(commands: argparse._SubParsersAction) -> None:
     answer = command("answer", "answer every scored question of a check")
     answer.add_argument("task", metavar="TASK")
     answer.add_argument(
-        "pairs", nargs="+", metavar="N ANSWER", help="question number, then the answer"
+        "--answer",
+        action="append",
+        default=[],
+        metavar="N=TEXT",
+        help="the answer to scored question N; repeat for each question",
     )
+    answer.add_argument("--all", metavar="TEXT", help="one answer for every scored question")
     review = command("review", "settle a check the grader and the rules split on")
     review.add_argument("task", metavar="TASK")
     verdict = review.add_mutually_exclusive_group(required=True)
@@ -136,18 +141,30 @@ def _quiz(ctx: Context, args: argparse.Namespace) -> int:
         if question.answer is not None:
             print(f"    answered: {question.answer}")
     if check.can_answer:
-        print(f"answer with: followup team answer {check.task_id} --as {viewer.id} 1 '...' 2 '...'")
+        print(
+            f"answer with: followup team answer {check.task_id} --as {viewer.id} --answer 1='...'"
+        )
     return 0
 
 
 def _answer(ctx: Context, args: argparse.Namespace) -> int:
-    if len(args.pairs) % 2:
-        raise ActionError("give pairs of a question number and an answer")
-    try:
-        answers = {int(n): text for n, text in zip(args.pairs[0::2], args.pairs[1::2], strict=True)}
-    except ValueError as exc:
-        raise ActionError("question numbers are whole numbers") from exc
-    count = actions.submit_answers(ctx, ctx.person(args.who), args.task, answers)
+    viewer = ctx.person(args.who)
+    if (args.all is None) == (not args.answer):
+        raise ActionError("give either --all TEXT or one --answer N=TEXT for each question")
+    if args.all is not None:
+        board = build_dashboard(ctx, viewer)
+        check = next((c for c in board.mine if c.task_id == ctx.task(args.task).task_id), None)
+        if check is None or check.status == "none":
+            raise ActionError("no check was issued to you for this task")
+        answers = {q.number: args.all for q in check.questions if q.graded}
+    else:
+        answers = {}
+        for item in args.answer:
+            number, _, text = item.partition("=")
+            if not number.strip().isdigit():
+                raise ActionError(f"{item!r}: write --answer N=TEXT with N a question number")
+            answers[int(number)] = text
+    count = actions.submit_answers(ctx, viewer, args.task, answers)
     print(f"recorded {count} answers; the next run grades them and tells the issuer")
     return 0
 

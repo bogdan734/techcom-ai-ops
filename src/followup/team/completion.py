@@ -291,7 +291,8 @@ class CompletionCheck:
             previous = message.message_id
             outcome = outcomes.get(message.message_id)
             if rung.channel is Channel.CALL and outcome and outcome[0] is not AnsweredBy.PERSON:
-                reached = {**base, "recipient_name": owner.name, "answered_by": outcome[0].value}
+                how = "no answer" if outcome[0] is AnsweredBy.NONE else "voicemail"
+                reached = {**base, "recipient_name": owner.name, "answered_by": how}
                 out.append(
                     Message(
                         Kind.UNREACHED,

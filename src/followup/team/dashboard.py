@@ -8,9 +8,7 @@ console report and the app.
 
 from __future__ import annotations
 
-import json
 from dataclasses import asdict, dataclass
-from pathlib import Path
 from typing import Any
 
 from followup.models import Task
@@ -350,20 +348,24 @@ def _models(ctx: Context, viewer: Person) -> tuple[ModelView, ...] | None:
 
 
 def _notices(ctx: Context, viewer: Person, limit: int = 25) -> list[NoticeView]:
-    found = []
-    for name, channel, address in (
-        ("delivery_log.jsonl", "message", viewer.name),
-        ("call_log.jsonl", "call", viewer.phone),
-    ):
-        path: Path = ctx.settings.out_dir / name
-        if not path.exists() or address is None:
-            continue
-        for line in path.read_text(encoding="utf-8").splitlines():
-            record = json.loads(line)
-            if record.get("to") == address:
-                when = record.get("sent_at") or record.get("placed_at") or ""
-                found.append(NoticeView(when, record["to"], channel, record.get("body", "")))
-    return sorted(found, key=lambda n: n.when, reverse=True)[:limit]
+    """Messages and calls delivered to the viewer, with the evaluation date they went out on."""
+    found: list[tuple[str, int, NoticeView]] = []
+    for name in ctx.vault.departments():
+        db = ctx.open(name)
+        for address, channel in ((viewer.name, "message"), (viewer.phone, "call")):
+            if address is None:
+                continue
+            rows = read_all(
+                db,
+                "SELECT COALESCE(sent_on, substr(updated_at, 1, 10)), rowid, message FROM actions "
+                "WHERE status = 'sent' AND target = ?",
+                (address,),
+            )
+            found += [
+                (day, rowid, NoticeView(day, address, channel, body)) for day, rowid, body in rows
+            ]
+    found.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    return [notice for _, _, notice in found[:limit]]
 
 
 def _name(ctx: Context, author: str) -> str:

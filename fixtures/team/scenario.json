@@ -1,0 +1,43 @@
+{
+  "title": "Five days at SURF Illinois",
+  "days": [
+    {
+      "date": "2026-10-21",
+      "tasks": "tasks-d1.json",
+      "label": "Day 1",
+      "title": "The layer starts",
+      "note": "The first run only records what exists, so nothing old is announced. TC-1007 was created yesterday, so its assignee hears about it."
+    },
+    {
+      "date": "2026-10-22",
+      "tasks": "tasks-d2.json",
+      "label": "Day 2",
+      "title": "Two tasks close",
+      "note": "John and Alex close their tasks. Each gets a completion check, the issuer hears at once, and the next open task is named. A new task appears and one spec changes."
+    },
+    {
+      "date": "2026-10-23",
+      "tasks": "tasks-d2.json",
+      "label": "Day 3",
+      "title": "Answers and questions",
+      "note": "Answer a check, ask a question in a task thread, or open a support ticket, then advance the day. John has not answered, so he gets a reminder."
+    },
+    {
+      "date": "2026-10-24",
+      "tasks": "tasks-d2.json",
+      "label": "Day 4",
+      "title": "Reviews and a call",
+      "note": "A doubtful grade waits for the issuer. A check that stays unanswered for two days becomes a phone call; here nobody picks up.",
+      "faults": [
+        "call=no-answer"
+      ]
+    },
+    {
+      "date": "2026-10-25",
+      "tasks": "tasks-d2.json",
+      "label": "Day 5",
+      "title": "The loop closes",
+      "note": "The issuer hears that the call went unanswered. Running a day twice sends nothing twice."
+    }
+  ]
+}

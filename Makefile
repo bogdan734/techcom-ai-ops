@@ -1,7 +1,7 @@
 PYTHON ?= python3
 RUN = PYTHONPATH=src $(PYTHON) -m followup run --today 2026-10-21
 
-.PHONY: install test lint run demo clean
+.PHONY: install test lint run demo team-demo clean
 
 install:
 	$(PYTHON) -m pip install -r requirements-dev.txt
@@ -34,6 +34,12 @@ demo: clean
 	@echo "\nmessages delivered: $$(wc -l < out/delivery_log.jsonl | tr -d ' ') in runs 1+2," \
 		"$$(wc -l < out/flaky/delivery_log.jsonl | tr -d ' ') in run 3," \
 		"$$(wc -l < out/model/delivery_log.jsonl | tr -d ' ') in runs 4+5"
+
+# Five days of the team layer on the demo fixtures: the layer starts, two tasks close, people
+# answer and ask, a call goes unanswered, and a repeated day sends nothing twice. The script
+# fails if anything went out twice or a check level leaked into the artefact.
+team-demo:
+	PYTHON=$(PYTHON) sh scripts/team-demo.sh
 
 clean:
 	rm -rf out

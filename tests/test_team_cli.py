@@ -47,7 +47,7 @@ def log(tmp_path):
 def test_quiz_shows_the_questions_and_how_to_answer(state, capsys):
     assert team(state, "quiz", "TC-1", "--as", "eve") == 0
     out = capsys.readouterr().out
-    assert "1. In your own words" in out and "followup team answer TC-1 --as eve 1" in out
+    assert "1. In your own words" in out and "followup team answer TC-1 --as eve --answer 1=" in out
 
 
 def answer_args(tmp_path, capsys, who="eve"):
@@ -55,7 +55,7 @@ def answer_args(tmp_path, capsys, who="eve"):
     team(tmp_path, "quiz", "TC-1", "--as", who)
     lines = capsys.readouterr().out.splitlines()
     scored = [re.match(r"\s*(\d+)\. ", line) for line in lines if "(not scored)" not in line]
-    return [item for m in scored if m for item in (m.group(1), f"answer {m.group(1)}")]
+    return [item for m in scored if m for item in ("--answer", f"{m.group(1)}=answer {m.group(1)}")]
 
 
 def test_answer_writes_the_rows_and_sends_nothing(state, capsys):
@@ -74,10 +74,10 @@ def test_answer_twice_exits_1(state, capsys):
     assert "already answered" in capsys.readouterr().err
 
 
-def test_answer_needs_pairs_of_a_number_and_an_answer(state, capsys):
-    assert team(state, "answer", "TC-1", "--as", "eve", "1") == 1
-    assert team(state, "answer", "TC-1", "--as", "eve", "one", "text") == 1
-    assert "whole numbers" in capsys.readouterr().err
+def test_answer_needs_a_number_and_a_text(state, capsys):
+    assert team(state, "answer", "TC-1", "--as", "eve", "--answer", "one=text") == 1
+    assert "write --answer N=TEXT" in capsys.readouterr().err
+    assert team(state, "answer", "TC-1", "--as", "eve", "--answer", "1") == 1
 
 
 def test_unknown_or_mailbox_identity_exits_1(state, capsys):
@@ -199,3 +199,16 @@ def test_run_with_an_org_flag_uses_department_files(tmp_path):
     run_day(tmp_path, world_records())
     assert (tmp_path / "out" / "state" / "engineering.db").exists()
     assert not (tmp_path / "out" / "state.db").exists()
+
+
+def test_answer_all_gives_one_answer_to_every_scored_question(state, capsys):
+    before = log(state)
+    assert team(state, "answer", "TC-1", "--as", "eve", "--all", "under 0.5 dB") == 0
+    assert "recorded" in capsys.readouterr().out and log(state) == before
+    assert team(state, "answer", "TC-1", "--as", "eve", "--all", "again") == 1
+
+
+def test_answer_all_and_pairs_together_are_refused(state, capsys):
+    assert team(state, "answer", "TC-1", "--as", "eve", "--answer", "1=x", "--all", "y") == 1
+    assert "either --all" in capsys.readouterr().err
+    assert team(state, "answer", "TC-1", "--as", "eve") == 1

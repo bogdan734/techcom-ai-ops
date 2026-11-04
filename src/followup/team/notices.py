@@ -60,8 +60,9 @@ _TEMPLATES: Mapping[Kind, str] = {
     Kind.TASK_CLOSED: "{assignee} closed {task_id} ({title}).{check}",
     Kind.NEXT_TASK: "{task_id} is closed. {next}",
     Kind.QUIZ: (
-        "Completion check for {task_id} ({title}). Answer every scored question: "
-        "followup team answer {task_id} --as {assignee_id} 1 'your answer' 2 '...'\n{questions}"
+        "Completion check for {task_id} ({title}). Answer every scored question with: "
+        "followup team answer {task_id} --as {assignee_id} "
+        "--answer 1='your answer' --answer 2='...'\n{questions}"
     ),
     Kind.QUIZ_REMINDER: (
         "Reminder: the completion check for {task_id} ({title}) is waiting for answers."
@@ -86,7 +87,9 @@ _TEMPLATES: Mapping[Kind, str] = {
     Kind.CHAT_QUESTION: "{author} wrote on {task_id}: {text}",
     Kind.CHAT_ESCALATED: "A question on {task_id} from {author} has waited {days} days. {text}",
     Kind.SUPPORT_TICKET: "Support ticket from {author}: {text}",
-    Kind.UNREACHED: "Nobody took the call to {recipient_name} about {task_id} ({answered_by}).",
+    Kind.UNREACHED: (
+        "The call to {recipient_name} about {task_id} was not answered by a person ({answered_by})."
+    ),
 }
 _REQUIRED = {
     kind: frozenset(name for _, name, _, _ in string.Formatter().parse(text) if name)
