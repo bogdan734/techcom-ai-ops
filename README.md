@@ -8,7 +8,7 @@
 [![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![Anthropic](https://img.shields.io/badge/LLM-Anthropic%20Messages%20API-D97757)](https://docs.anthropic.com/)
 [![SQLite](https://img.shields.io/badge/state-SQLite-003B57?logo=sqlite&logoColor=white)](https://www.sqlite.org/)
-[![Tests](https://img.shields.io/badge/tests-287%20passed-2ea44f)](tests)
+[![Tests](https://img.shields.io/badge/tests-667%20passed-2ea44f)](tests)
 [![License](https://img.shields.io/badge/license-MIT-black)](LICENSE)
 
 Dates and statuses decide **whether** a task needs attention ·
@@ -33,7 +33,8 @@ Solution to the TechCom AI Engineer assessment. The service pulls tasks from a m
 | **Model down or answering garbage** | the 4 tasks routed by their note are put `on_hold`, the other 3 go out with template wording; the next run finishes the 4, once |
 | **Prompt injection** in TC-1006 | flagged, kept away from the model; the task gets its normal overdue follow-up |
 | **Opt-in hardening** | dry run, dead letters, reminder cadence and an approval gate for escalations, each off until switched on ([how they work](#opt-in-hardening)) |
-| **Tests** | 287 in 1.01 s, no network, no API key |
+| **Team layer** | accounts, tasks given and taken, a completion quiz, check levels, an audit of the model, a database per department, chat, calls and an app, all off until `ORG_FILE` is set ([team layer](#-team-layer)) |
+| **Tests** | 667, no network, no API key |
 
 ---
 
@@ -44,6 +45,7 @@ Solution to the TechCom AI Engineer assessment. The service pulls tasks from a m
 - [Quick start](#-quick-start)
 - [Run artefacts](#-run-artefacts)
 - [How it works](#-how-it-works)
+- [Team layer](#-team-layer)
 - [Assumptions](#-assumptions)
 - [Design trade-offs](#️-design-trade-offs)
 - [Configuration](#️-configuration)
@@ -493,6 +495,103 @@ it in layers:
 
 ---
 
+## 👥 Team layer
+
+Opt-in, off until `ORG_FILE` is set. The follow-up service becomes a small accountability desk: people sign in to their own accounts, issuers give tasks, finished work gets a short quiz drawn from the task text, the amount of checking follows each person's record, and the model that writes and grades the checks is checked as well. With no org file nothing changes: `decisions.json`, the delivery log and the audit events are what the first version wrote, and a test pins it.
+
+<p align="center">
+  <img src="docs/img/app-task.jpg" width="860" alt="An issuer's view of a finished task: its brief, the name the code check could not find, and the answers">
+</p>
+
+```mermaid
+flowchart LR
+  A["Issuer gives a task<br/>assistant lays out the spec"] --> B["Assignee accepts<br/>reads the brief"]
+  B --> C["Assignee hands in"]
+  C --> D["Issuer told at once<br/>next task named"]
+  C --> E["Completion check<br/>sized by the person's level"]
+  E --> F["Answers graded<br/>key terms, model, audit sample"]
+  F -->|doubt| G["Issuer decides"]
+  F --> H["Verdict to the issuer<br/>the level adapts"]
+  E -. unanswered .-> I["Reminder, then a call"]
+```
+
+### Try it
+
+```bash
+make team-demo   # five days on fixtures/team; fails on a duplicate key or a leaked level
+make team-app    # the app on http://127.0.0.1:8765; the sign-in page lists the demo accounts
+```
+
+In the app, sign in as `noah` (a manager) and press **Advance** to play the first two days. Then sign in as `john` or `alex` to answer a check, as `maria` to ask a question, and as `noah` again to read the verdict. The same things work from the console: `followup team --help` lists `quiz`, `answer`, `review`, `chat`, `support`, `trust`, `report`, `users` and `db`.
+
+<table>
+<tr>
+<td><img src="docs/img/app-tasks.jpg" alt="Tasks of a manager, in a table"></td>
+<td><img src="docs/img/app-messages.jpg" alt="A conversation where the assistant quotes the spec"></td>
+<td><img src="docs/img/app-team.jpg" alt="Check levels and the record of the model"></td>
+</tr>
+</table>
+
+### What it adds
+
+| Piece | What it does | Code |
+|---|---|---|
+| **A database per department** | One SQLite file per department. Each carries an application id, its own name and a migration ledger with checksums, so a renamed copy, the old `state.db`, an edited step or a file from newer code is refused before a row is read. Migrations run one transaction each, after a backup. SQLite's authorizer limits tables and columns by role. `followup team db split` moves an old `state.db` over without losing a sent record | `vault.py`, `schema.py`, `access.py`, `split.py` |
+| **Accounts** | A password per person (scrypt, salted), five wrong tries lock the account, an unknown account costs the same time and gives the same answer. The session is an `HttpOnly`, `SameSite=Strict` cookie; who acts always comes from it | `accounts.py`, `webapp.py` |
+| **Tasks given and taken** | An issuer gives a task to someone in their own line. The assignee accepts and hands in; the issuer can send work back with a reason. These are events over the status the tasks API reports, so the existing run sees them unchanged | `tasks.py`, `actions.py` |
+| **Brief and assistant** | A spec laid out as goal, requirements, limits and names, using only the author's sentences, with a list of what is missing (no number, a vague word, no named commands for an engineer). In a thread the assistant answers with sentences of the spec, copied exactly, or says it cannot | `brief.py`, `assistant.py` |
+| **Completion check** | When a task closes the assignee restates what it required: a teach-back question and fill-in-the-blank questions cut from the spec. Key terms decide first, the model is a second opinion, a sample is graded again by another model, and a split goes to the issuer | `quiz.py`, `grading.py`, `completion.py` |
+| **Code check** | The commands, options and routes a spec names are looked for in the engineer's code (`ast` for Python). A missing name becomes a question, never a verdict | `trace.py` |
+| **Check levels** | A ledger of results, scored when read: the lower bound of the Wilson interval over decayed results. The level sets how much is asked (table below). Hidden by default, or shown to issuers for their own line only | `trust.py`, `sampling.py` |
+| **The model's own record** | Every question, key and answer needs a quote that is in the spec, or it is dropped. Each feature of each model has a ledger; a bad record drops the feature to rules and tells the boss. `followup team calibrate` scores the grader against labelled answers with Cohen's kappa | `check.py`, `pins.py`, `calibrate.py` |
+| **Notices** | New task, changed spec, task started, task closed, next task, quiz, verdict. The id covers what the message is about and never its wording, so a rerun cannot send one twice | `notices.py` |
+| **Chat and support** | A thread per task between assignee and issuer. An unanswered question climbs the reporting line one level per SLA, as in a paging policy. Support tickets go to every support person. A finished conversation drops into a done list | `chat.py` |
+| **Calls** | An unanswered check becomes a reminder, then a phone call, for people who agreed to calls, inside a calling window. A mock provider, or a real one over HTTP ([attaching a voice provider](docs/calls.md)), with the same idempotency contract as messages | `calls.py` |
+| **Repeats and overlap** | A non-blocking lock per out directory stops two runs from overlapping. A run ledger keeps the artefact of the first run of an input and flags a later run that disagrees | `run_lock.py`, `ledger.py`, `runner.py` |
+
+### How much is asked
+
+| Level | Questions | Code names checked | When |
+|---|---|---|---|
+| `tightened` | up to `QUIZ_MAX_QUESTIONS` (5) | all | two failures in the last five results |
+| `normal` | 3 | 5 | where a person starts, and for their first `TRUST_PROBATION_TASKS` results |
+| `reduced` | 1, on about one task in `REDUCED_SKIP_LOT` | 2 | a long clean run (score of at least `TRUST_REDUCED_SCORE`) |
+| `halted` | none: the issuer's manager reviews | n/a | repeated failures on `tightened`, until `followup team clear PERSON` |
+
+The levels borrow the switching rules of acceptance sampling (normal, tightened and reduced inspection); the thresholds are this repository's own and are settings. Research and sources: [docs/research/2026-11-04-task-accountability.md](docs/research/2026-11-04-task-accountability.md).
+
+### Data separation, in practice
+
+- **Departments are files.** `out/state/<department>.db` holds that department's follow-ups, quizzes, answers and chat. `_control.db` holds what belongs to a person or a run: routes, results, accounts, sessions, the run ledger.
+- **A task keeps the department it was first seen in.** A person who moves does not drag their sent records into a file that has never heard of them.
+- **Roles are enforced where SQLite can.** A staff connection cannot attach another database, run DDL or read `grades`; the quiz `level` column reads `NULL` for anyone who may not see trust. This separates code paths and mistakes. It does not defend against someone who can open the files directly.
+- **The old `state.db` is never written** in team mode, and a run refuses to start beside one that holds actions nobody split.
+
+### Governance
+
+Levels set how much is checked. They never feed pay or discipline. Staff can see that the system exists, nobody sees their own level, `followup team trust --person P` lists the events behind a level for someone in the reader's line, and `TRUST_VISIBILITY=hidden` (the default) shows no level to anyone. Scoring staff can fall under employment-AI rules (the EU AI Act lists worker monitoring and task allocation as high risk, and Illinois requires notice of AI in some employment decisions); the research note links the sources. This is not legal advice.
+
+### Team layer settings
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `ORG_FILE` | (off) | people, roles, departments and who reports to whom; `--org` on `followup run` sets it |
+| `TRUST_VISIBILITY` | `hidden` | `issuers` shows levels to managers and up, for their own line |
+| `TRUST_HALF_LIFE_DAYS` / `TRUST_PROBATION_TASKS` | `90` / `3` | how fast results fade, and how many a newcomer needs before levels can change |
+| `TRUST_REDUCED_SCORE` / `TRUST_HALT_FAILS` / `REDUCED_SKIP_LOT` | `0.7` / `3` / `3` | thresholds of the levels |
+| `QUIZ_MAX_QUESTIONS` / `QUIZ_PASS_SCORE` | `5` / `0.6` | size of the strictest quiz, and the share of key terms an answer needs |
+| `AUDIT_RATE` / `AUDIT_MODEL` | `0.25` / empty | share of grades a second model checks, and which model (empty: the main one with the audit prompt) |
+| `MODEL_FLOOR` | `0.5` | below this pass rate a model feature falls back to rules |
+| `NEW_TASK_WINDOW_DAYS` | `2` | how recent a task must be to be announced when the layer starts |
+| `CHAT_SLA_DAYS` / `SUPPORT_SLA_DAYS` / `LADDER_STEP_DAYS` | `2` / `1` / `1` | when an unanswered question climbs, and the step between quiz, reminder and call |
+| `CODE_ROOT` | folder of the tasks file | where `code_path` is resolved |
+| `RUN_LOCK` | `true` | one run per out directory; a second one exits 75 |
+| `CALLS` / `CALL_WINDOW` / `CALL_TIME` | `false` / `09:00-18:00` / now (UTC) | calls on or off, the hours they may be placed, and the clock (set it to make runs reproducible) |
+| `CALLS_PROVIDER` / `CALLS_API_URL` / `CALLS_API_KEY` | `mock` / | `http` sends calls to a real provider over TLS |
+| `CALL_PURPOSE` / `CALLS_CALLBACK_URL` / `CALLS_WEBHOOK_SECRET` | `reminder` / / | `verification` makes the call ask the questions; where the provider reports; the secret that opens the webhook |
+
+---
+
 ## 🧾 Assumptions
 
 - **Dates.** The evaluation date is 2026-10-21 UTC (configurable). A task is overdue when its
@@ -539,6 +638,12 @@ it in layers:
 | Reminders count days from the evaluation date on which the previous round was confirmed sent | Task dates, or the wall-clock time the action was stored | Task dates would need a different anchor per rule, and the wall clock ignores `EVALUATION_DATE` (tests, replays); one anchor also means a round that never went out holds back the next |
 | An escalation goes out once per task state, the final one included | Repeat escalations like reminders | It is the top of the ladder, and with the gate on a repeat would queue another one for approval every round; the final one shares its id with the threshold escalation, so only one of the two is sent |
 | A waiting escalation exits 0 and shows in the run summary; `dead` exits 2 | Exit 2 for `awaiting_approval` too | On a 15-minute schedule it would alarm all day over a queue that waits for people; a dead letter is a failed delivery that only a person can release |
+| One SQLite file per department | A department column in one file | Separation would hang on a `WHERE` in every query; files give isolation, backup and deletion per department, at the cost of harder cross-department queries |
+| Trust as an append-only ledger, scored when read | A score column that is updated | A rerun cannot count a result twice, and the events behind a level can be listed |
+| Key terms from the spec decide, the model is a second opinion | The model grades alone | Judges show position, length and self-preference bias and can be steered by an answer; a split goes to a person |
+| A quote from the spec on every question and every assistant reply | Free model wording | What the system tells a person is what the issuer wrote; an ungrounded item is dropped and counts against the model |
+| Status moves as events over the tasks API | Writing back to the API | The API is read-only here; the events are what a tracker integration would send |
+| Accounts with scrypt and cookie sessions, local server only | A login service | Zero infrastructure for a demo; the README says what a deployment puts in front |
 
 ---
 
@@ -580,10 +685,16 @@ count like a 503.
 pytest && ruff check src tests && ruff format --check src tests
 ```
 
-**287 tests; `pytest` prints `287 passed in 1.01s`.** The tasks API, the messaging provider
+**667 tests.** The tasks API, the messaging provider
 and the model are served in-process (`httpx2.MockTransport`), so the suite needs no network
 and no key. The Anthropic adapter is tested against a mocked Messages API: request shape,
 structured output config, thinking blocks, refusals, truncation, error classification.
+
+The team layer adds 380 of them. Besides the unit tests there is a five-day scenario through the
+console and the run, two real processes that race for the run lock, a check that a run without an
+org file still writes the submitted `decisions.json`, and a mutation pass over the guards that
+matter (grounding, probation, the lock, route pinning, the identity in a request). `make
+team-demo` replays the scenario from the shell, and CI runs it after `make demo`.
 
 Among the scenarios: every decision rule and the exact threshold boundaries; ambiguous dates and odd statuses; duplicate and
 malformed records; a second run with unchanged data; an escalation ladder across days;
@@ -630,12 +741,29 @@ src/followup/
 ├── api.py               # tasks and messaging HTTP clients
 ├── retry.py             # backoff, Retry-After, circuit breaker
 ├── delivery.py          # outbox: claim, send, reconcile, dead letters
+├── run_lock.py          # one run per out directory
 ├── store.py             # SQLite outbox, note readings, schema migration
 ├── mock_api.py          # in-process tasks and messaging APIs
 ├── faults.py            # scripted failures for the APIs and the model
-└── audit.py             # console log and audit.jsonl
-tests/                   # 287 tests, grouped by the module they pin
+├── audit.py             # console log and audit.jsonl
+└── team/                # the team layer, inert until ORG_FILE is set
+    ├── org.py, extras.py, settings.py   # people and roles, spec fields, environment
+    ├── schema.py, vault.py, access.py   # department files, migrations, roles in SQLite
+    ├── routes.py, split.py              # a task's department, the move from state.db
+    ├── trust.py, sampling.py            # result ledger, levels, seeded sampling
+    ├── spec_terms.py, brief.py          # what a spec says, laid out for the reader
+    ├── quiz.py, grading.py, trace.py    # the check, its grading, the code check
+    ├── check.py, pins.py, calibrate.py  # the model's record, kept answers, kappa
+    ├── notices.py, completion.py        # messages with stable ids, the check per task
+    ├── chat.py, assistant.py, calls.py  # threads, quote-or-abstain, phone calls
+    ├── runner.py, ledger.py             # the team pass and its replay ledger
+    ├── accounts.py, tasks.py, actions.py  # sign-in, tasks and moves, what a person may do
+    ├── context.py, dashboard.py         # the read model shared by console and app
+    ├── cli.py, cli_db.py, calibrate_cli.py
+    └── webapp.py, ui/index.html         # the app
+tests/                   # 667 tests, grouped by the module they pin
 fixtures/tasks.json      # the supplied fixture
+fixtures/team/           # org, two days of tasks with specs, a scenario, a labelled set, a code tree
 docs/sample/             # artefacts of the demo runs
 ```
 
@@ -715,6 +843,28 @@ audit log is append-only.
   sentence without any of those can still pass, and an unusual capitalised word can send a
   good draft to its template. Recipient, decision and dates never come from
   the model, so the risk is limited to wording.
+- **Accounts are local.** The app listens on this computer only and signs people in with a
+  password. There is no single sign-on, no second factor and no password reset; put a reverse
+  proxy with real authentication in front before more than a demo team uses it. `--demo-logins`
+  publishes every password on the sign-in page and exists for demos only.
+- **Department separation is application-level.** SQLite has no users: the authorizer and the
+  file layout stop code paths and mistakes, not a process that can open the files itself.
+  Postgres schemas with row-level security would enforce it against every client.
+- **A check is evidence, not proof.** Key terms can be stuffed into an answer and a name in the
+  code can be dead code; the model second opinion and the issuer's review are the defence, and
+  presence of a name is reported as a question for the engineer.
+- **One check per task and spec.** A task sent back and handed in again is not asked again
+  unless its spec changed, and a person who is reopened in a thread keeps the old answers.
+- **Status moves stay here.** Accept, hand in and send back are events over the tasks API; a
+  tracker integration has to send them on.
+- **Voice is a delivery channel, not a speech engine.** The service sends the words and the
+  questions and takes the answers from a webhook; a bot that listens and transcribes has to
+  exist on the provider's side ([docs/calls.md](docs/calls.md)). Calls need consent, a number
+  and the right hours, and local law may add rules.
+- **The team layer was exercised offline.** Every test and the five-day demo use the stub model
+  and the mock providers; the new request kinds have not been run against the real model or a
+  live telephony provider, and a model that writes weak questions would show up in its own
+  record only after several tasks.
 - **The stub is a test double, not a model.** The keyword rules cover the fixture; the real
   model's accuracy on notes should be measured on a labelled set before production.
 

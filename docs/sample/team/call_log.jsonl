@@ -1,0 +1,1 @@
+{"message_id": "call-0001", "idempotency_key": "c6de5981374dad42f17847064e6c5574", "placed_at": "2026-11-04T08:30:28+00:00", "answered_by": "none", "task_id": "TC-1001", "decision": "notify", "to": "+15551110001", "body": "This is the follow-up service for John Smith. The completion check for task TC-1001 is waiting for your answers.", "purpose": "reminder"}

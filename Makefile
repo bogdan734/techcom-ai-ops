@@ -1,7 +1,7 @@
 PYTHON ?= python3
 RUN = PYTHONPATH=src $(PYTHON) -m followup run --today 2026-10-21
 
-.PHONY: install test lint run demo team-demo clean
+.PHONY: install test lint run demo team-demo team-app clean
 
 install:
 	$(PYTHON) -m pip install -r requirements-dev.txt
@@ -40,6 +40,13 @@ demo: clean
 # fails if anything went out twice or a check level leaked into the artefact.
 team-demo:
 	PYTHON=$(PYTHON) sh scripts/team-demo.sh
+
+# The app on http://127.0.0.1:8765 with the five-day scenario. Demo logins are on: every account
+# has the password demo-<id>-pass and the sign-in page lists them. Never use this on a real team.
+team-app:
+	PYTHONPATH=src TRUST_VISIBILITY=issuers CALLS=true CALL_TIME=10:00 $(PYTHON) -m followup team serve \
+		--org fixtures/team/org.json --tasks fixtures/team/tasks-d1.json \
+		--scenario fixtures/team/scenario.json --out out/app --fresh --demo-logins
 
 clean:
 	rm -rf out

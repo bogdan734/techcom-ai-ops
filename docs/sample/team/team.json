@@ -1,0 +1,225 @@
+{
+  "date": "2026-10-25",
+  "departments": {
+    "_unrouted": {
+      "checks": [
+        {
+          "person": null,
+          "quiz": null,
+          "status": "skipped",
+          "task": "TC-1004"
+        }
+      ],
+      "messages": [],
+      "waiting": []
+    },
+    "engineering": {
+      "checks": [
+        {
+          "person": "alex",
+          "quiz": "fd4bc37196d12b3504115836ac8359a4",
+          "status": "fail",
+          "task": "TC-1005"
+        },
+        {
+          "person": "chris",
+          "quiz": null,
+          "status": "skipped",
+          "task": "TC-1008"
+        }
+      ],
+      "messages": [
+        {
+          "channel": "message",
+          "id": "01b355ec90340f954f607d37df470002",
+          "kind": "verdict",
+          "task": "TC-1005",
+          "to": "noah"
+        },
+        {
+          "channel": "message",
+          "id": "55a8bb9c8a76b296185d0994c96abc39",
+          "kind": "next_task",
+          "task": "TC-1005",
+          "to": "alex"
+        },
+        {
+          "channel": "message",
+          "id": "f63f2ede8c8836ab6c44d4ec6172ad65",
+          "kind": "task_closed",
+          "task": "TC-1005",
+          "to": "noah"
+        }
+      ],
+      "waiting": []
+    },
+    "field-ops": {
+      "checks": [
+        {
+          "person": "john",
+          "quiz": "106beed410f98ae205560a03a8afddae",
+          "status": "pending",
+          "task": "TC-1001"
+        },
+        {
+          "person": "maria",
+          "quiz": null,
+          "status": "skipped",
+          "task": "TC-1002"
+        },
+        {
+          "person": "lee",
+          "quiz": null,
+          "status": "skipped",
+          "task": "TC-1003"
+        },
+        {
+          "person": "jamie",
+          "quiz": null,
+          "status": "skipped",
+          "task": "TC-1006"
+        },
+        {
+          "person": "taylor",
+          "quiz": null,
+          "status": "skipped",
+          "task": "TC-1007"
+        },
+        {
+          "person": "dana",
+          "quiz": null,
+          "status": "skipped",
+          "task": "TC-1009"
+        },
+        {
+          "person": "morgan",
+          "quiz": null,
+          "status": "skipped",
+          "task": "TC-1010"
+        },
+        {
+          "person": "maria",
+          "quiz": null,
+          "status": "skipped",
+          "task": "TC-1011"
+        }
+      ],
+      "messages": [
+        {
+          "channel": "message",
+          "id": "1ce0ffc786fa8d91741430017c7e0e18",
+          "kind": "chat_question",
+          "task": "TC-1011",
+          "to": "maria"
+        },
+        {
+          "channel": "message",
+          "id": "384eba222482b31fc34c28ec32342954",
+          "kind": "unreached",
+          "task": "TC-1001",
+          "to": "mia"
+        },
+        {
+          "channel": "message",
+          "id": "4fddacd860fe7c7fe9911881b47d6e9a",
+          "kind": "quiz_reminder",
+          "task": "TC-1001",
+          "to": "john"
+        },
+        {
+          "channel": "message",
+          "id": "814e6964a51a9aded23bcae55ee264b9",
+          "kind": "task_closed",
+          "task": "TC-1001",
+          "to": "mia"
+        },
+        {
+          "channel": "message",
+          "id": "b0a38590487b83daf6b3c9d7e106dc41",
+          "kind": "spec_changed",
+          "task": "TC-1007",
+          "to": "taylor"
+        },
+        {
+          "channel": "call",
+          "id": "c6de5981374dad42f17847064e6c5574",
+          "kind": "quiz_call",
+          "task": "TC-1001",
+          "to": "john"
+        },
+        {
+          "channel": "message",
+          "id": "cf3438683801bc3d48098898e7b7ca2d",
+          "kind": "spec_changed",
+          "task": "TC-1007",
+          "to": "mia"
+        },
+        {
+          "channel": "message",
+          "id": "f3c2665cf1eade8d6d73ba5563bcb3af",
+          "kind": "next_task",
+          "task": "TC-1001",
+          "to": "john"
+        },
+        {
+          "channel": "message",
+          "id": "ff8e6401ca794a3245155f355972dc67",
+          "kind": "quiz",
+          "task": "TC-1001",
+          "to": "john"
+        }
+      ],
+      "waiting": []
+    },
+    "management": {
+      "checks": [],
+      "messages": [],
+      "waiting": []
+    },
+    "support": {
+      "checks": [],
+      "messages": [
+        {
+          "channel": "message",
+          "id": "13a1d1a4254a1095e0e0f2bf06ba73bf",
+          "kind": "support_ticket",
+          "task": "SUPPORT-d678292b",
+          "to": "tom"
+        },
+        {
+          "channel": "message",
+          "id": "46338c53c1f7fdd50ee11483c1d70309",
+          "kind": "chat_escalated",
+          "task": "SUPPORT-d678292b",
+          "to": "rhea"
+        },
+        {
+          "channel": "message",
+          "id": "983e13408b186d411bea640557e03d20",
+          "kind": "support_ticket",
+          "task": "SUPPORT-d678292b",
+          "to": "sue"
+        },
+        {
+          "channel": "message",
+          "id": "beb7429bb5fa1dd5c66fe2e634fb92a6",
+          "kind": "chat_escalated",
+          "task": "SUPPORT-d678292b",
+          "to": "sam"
+        }
+      ],
+      "waiting": [
+        {
+          "since": "2026-10-22",
+          "task": "",
+          "thread": "d678292b7243b146"
+        }
+      ]
+    },
+    "warehouse": {
+      "checks": [],
+      "messages": [],
+      "waiting": []
+    }
+  }
+}
