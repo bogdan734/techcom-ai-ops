@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import date
 
 from followup.guard import screen_text
@@ -208,19 +208,19 @@ def create_task(
     viewer: Person,
     *,
     title: str,
-    assignee_id: str,
+    assignee_ids: Sequence[str],
     spec: str,
     project: str = "General",
     due: str = "",
-) -> str:
-    """An issuer gives a task to someone in their line; the next run tells the assignee."""
+) -> list[str]:
+    """An issuer gives a task to people in their line; the next run tells each of them.
+
+    Several people get one part each, made together under one group id, so the task counts as
+    done only when every part is. The ids come back in the order the people were named.
+    """
     if not ctx.org.can(viewer.id, Capability.ISSUE_TASKS):
         raise ActionError(f"{viewer.id} may not give tasks")
-    assignee = ctx.org.find(assignee_id)
-    if assignee is None or assignee.id not in ctx.org.below(viewer.id):
-        raise ActionError("choose someone from your own line")
-    if assignee.role in (Role.PROJECT_MANAGER, Role.WAREHOUSE, Role.SUPPORT):
-        raise ActionError(f"{assignee.name} does not take tasks")
+    assignees = _assignees(ctx, viewer, assignee_ids)
     title, spec, project = _text(title, 200), _text(spec, 4000), _text(project, 100) or "General"
     if not title or len(spec) < 10:
         raise ActionError("a task needs a title and a spec of at least a sentence")
@@ -230,29 +230,36 @@ def create_task(
         except ValueError as exc:
             raise ActionError("the due date is YYYY-MM-DD") from exc
     db = ctx.vault.open(CONTROL)
+    ids: list[str] = []
     try:
-        task_id = tasks_module.next_task_id(db)
-        record = {
-            "task_id": task_id,
-            "project": project,
-            "task": title,
-            "assigned_to": assignee.name,
-            "due_date": due or None,
-            "status": "Not Started",
-            "last_update": ctx.today.isoformat(),
-            "notes": "",
-            "spec": spec,
-            "assigned_by": viewer.name,
-            "created": ctx.today.isoformat(),
-        }
-        db.execute(
-            "INSERT INTO authored_tasks (task_id, author_id, record, created_on) "
-            "VALUES (?, ?, ?, ?)",
-            (task_id, viewer.id, json.dumps(record), ctx.today.isoformat()),
-        )
+        db.execute("BEGIN")
+        for assignee in assignees:
+            task_id = tasks_module.next_task_id(db)
+            ids.append(task_id)
+            record = {
+                "task_id": task_id,
+                "project": project,
+                "task": title,
+                "assigned_to": assignee.name,
+                "due_date": due or None,
+                "status": "Not Started",
+                "last_update": ctx.today.isoformat(),
+                "notes": "",
+                "spec": spec,
+                "assigned_by": viewer.name,
+                "created": ctx.today.isoformat(),
+            }
+            if len(assignees) > 1:
+                record["group"] = ids[0]
+            db.execute(
+                "INSERT INTO authored_tasks (task_id, author_id, record, created_on) "
+                "VALUES (?, ?, ?, ?)",
+                (task_id, viewer.id, json.dumps(record), ctx.today.isoformat()),
+            )
+        db.execute("COMMIT")
     finally:
         db.close()
-    return task_id
+    return ids
 
 
 def accept_task(ctx: Context, viewer: Person, task_id: str) -> None:
@@ -306,6 +313,21 @@ def assist_now(ctx: Context, thread_id: str, gateway: LLMGateway) -> None:
         finally:
             control.close()
         return
+
+
+def _assignees(ctx: Context, viewer: Person, ids: Sequence[str]) -> list[Person]:
+    """Who gets the task: each person once, in the order named, all from the issuer's line."""
+    if not ids:
+        raise ActionError("choose who gets the task")
+    people: list[Person] = []
+    for person_id in dict.fromkeys(ids):
+        assignee = ctx.org.find(person_id)
+        if assignee is None or assignee.id not in ctx.org.below(viewer.id):
+            raise ActionError("choose someone from your own line")
+        if assignee.role in (Role.PROJECT_MANAGER, Role.WAREHOUSE, Role.SUPPORT):
+            raise ActionError(f"{assignee.name} does not take tasks")
+        people.append(assignee)
+    return people
 
 
 def _own_task(ctx: Context, viewer: Person, task_id: str, verb: str):

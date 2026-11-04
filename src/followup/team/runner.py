@@ -60,6 +60,7 @@ from .quiz import QuizMaker, open_quiz
 from .routes import pin_routes
 from .schema import CONTROL
 from .settings import TeamSettings
+from .shared import Shared, shared_tasks
 from .split import check_legacy
 from .trust import Ledger
 from .vault import Vault
@@ -124,6 +125,7 @@ def team_run(
         )
         routes = pin_routes(control, tasks, org, today)
         extras = load_extras(records, org)
+        shared = shared_tasks(tasks, extras)
         audit = ModelAudit(Ledger(control, "model_events"), gateway.model, team, today)
         trust = Ledger(control, "trust_events")
         breaker = CircuitBreaker()
@@ -169,7 +171,7 @@ def team_run(
         for name, department in departments.items():
             mine = sorted((t for t in tasks if routes[t.task_id] == name), key=lambda t: t.task_id)
             _settle_calls(department, calls_api)
-            _team_pass(department, mine, extras, open_by_owner, team, today)
+            _team_pass(department, mine, extras, shared, open_by_owner, team, today)
         boss = org.with_role(Role.BOSS)[0]
         departments[boss.department].messages += next(
             iter(departments.values())
@@ -232,6 +234,7 @@ def _team_pass(
     department: _Department,
     tasks: Sequence[Task],
     extras: Mapping[str, TaskExtras],
+    shared: Mapping[str, Shared],
     open_by_owner: Mapping[str, Sequence[Task]],
     team: TeamSettings,
     today,
@@ -242,8 +245,9 @@ def _team_pass(
         extra = extras.get(task.task_id)
         record_history(db, task, extra, today, activation)
         rows = history_for(db, task.task_id)
+        whole = shared.get(extra.group) if extra and extra.group else None
         department.messages += lifecycle_notices(
-            task, extra, rows, open_by_owner, team.org, today, team.new_task_window_days
+            task, extra, rows, open_by_owner, team.org, today, team.new_task_window_days, whole
         )
         result = department.check.absorb(task, extra, db, rows, today)
         department.checks.append(result)

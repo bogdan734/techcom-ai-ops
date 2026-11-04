@@ -8,7 +8,7 @@
 [![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![Anthropic](https://img.shields.io/badge/LLM-Anthropic%20Messages%20API-D97757)](https://docs.anthropic.com/)
 [![SQLite](https://img.shields.io/badge/state-SQLite-003B57?logo=sqlite&logoColor=white)](https://www.sqlite.org/)
-[![Tests](https://img.shields.io/badge/tests-667%20passed-2ea44f)](tests)
+[![Tests](https://img.shields.io/badge/tests-680%20passed-2ea44f)](tests)
 [![License](https://img.shields.io/badge/license-MIT-black)](LICENSE)
 
 Dates and statuses decide **whether** a task needs attention ·
@@ -30,9 +30,9 @@ Solution to the TechCom AI Engineer assessment. The service pulls tasks from a m
 > [commits since the submission](https://github.com/bogdan734/techcom-ai-ops/compare/b67e0c6...main),
 > [changelog](CHANGELOG.md)). Both are off until switched on: with the defaults a run writes the same
 > `decisions.json`, delivery log and audit events as the submitted version, and the one visible
-> change is that `state.db` is upgraded in place. CI passes on Python 3.11, 3.12 and 3.13. The new
-> request kinds ran against the stub model and the mock providers, not a real model or a live phone
-> provider, and a task has one assignee
+> change is that `state.db` is upgraded in place. CI passes on Python 3.11, 3.12 and 3.13. A task
+> can go to several people and stays in progress until each has handed in. The new request kinds
+> ran against the stub model and the mock providers, not a real model or a live phone provider
 > ([what is incomplete](#-what-is-incomplete-and-what-i-would-change-for-production)).
 
 On the supplied `tasks.json` (evaluation date 2026-10-21):
@@ -48,7 +48,7 @@ On the supplied `tasks.json` (evaluation date 2026-10-21):
 | **Prompt injection** in TC-1006 | flagged, kept away from the model; the task gets its normal overdue follow-up |
 | **Opt-in hardening** | dry run, dead letters, reminder cadence and an approval gate for escalations, each off until switched on ([how they work](#opt-in-hardening)) |
 | **Team layer** | accounts, tasks given and taken, a completion quiz, check levels, an audit of the model, a database per department, chat, calls and an app, all off until `ORG_FILE` is set ([team layer](#-team-layer)) |
-| **Tests** | 667, no network, no API key |
+| **Tests** | 680, no network, no API key |
 
 ---
 
@@ -537,9 +537,9 @@ Opt-in, off until `ORG_FILE` is set. The follow-up service becomes a small accou
 
 ```mermaid
 flowchart LR
-  A["Issuer gives a task<br/>assistant lays out the spec"] --> B["Assignee accepts<br/>reads the brief"]
+  A["Issuer gives a task<br/>to one person or several<br/>assistant lays out the spec"] --> B["Assignee accepts<br/>reads the brief"]
   B --> C["Assignee hands in"]
-  C --> D["Issuer told at once<br/>next task named"]
+  C --> D["Issuer told at once<br/>next task named<br/>shared task: how many are in"]
   C --> E["Completion check<br/>sized by the person's level"]
   E --> F["Answers graded<br/>key terms, model, audit sample"]
   F -->|doubt| G["Issuer decides"]
@@ -554,7 +554,9 @@ make team-demo   # five days on fixtures/team; fails on a duplicate key or a lea
 make team-app    # the app on http://127.0.0.1:8765; the sign-in page lists the demo accounts
 ```
 
-In the app, sign in as `noah` (a manager) and press **Advance** to play the first two days. Then sign in as `john` or `alex` to answer a check, as `maria` to ask a question, and as `noah` again to read the verdict. The same things work from the console: `followup team --help` lists `quiz`, `answer`, `review`, `chat`, `support`, `trust`, `report`, `users` and `db`.
+In the app, sign in as `noah` (a manager) and press **Advance** to play the first two days. Then sign in as `john` or `alex` to answer a check, as `maria` to ask a question, and as `noah` again to read the verdict. To give
+one task to several people, press **New task** and tick more than one name: it reads `0 of 2 handed
+in` until each of them has. The same things work from the console: `followup team --help` lists `quiz`, `answer`, `review`, `chat`, `support`, `trust`, `report`, `users` and `db`.
 
 <table>
 <tr>
@@ -570,7 +572,7 @@ In the app, sign in as `noah` (a manager) and press **Advance** to play the firs
 |---|---|---|
 | **A database per department** | One SQLite file per department. Each carries an application id, its own name and a migration ledger with checksums, so a renamed copy, the old `state.db`, an edited step or a file from newer code is refused before a row is read. Migrations run one transaction each, after a backup. SQLite's authorizer limits tables and columns by role. `followup team db split` moves an old `state.db` over without losing a sent record | `vault.py`, `schema.py`, `access.py`, `split.py` |
 | **Accounts** | A password per person (scrypt, salted), five wrong tries lock the account, an unknown account costs the same time and gives the same answer. The session is an `HttpOnly`, `SameSite=Strict` cookie; who acts always comes from it | `accounts.py`, `webapp.py` |
-| **Tasks given and taken** | An issuer gives a task to someone in their own line. The assignee accepts and hands in; the issuer can send work back with a reason. These are events over the status the tasks API reports, so the existing run sees them unchanged | `tasks.py`, `actions.py` |
+| **Tasks given and taken** | An issuer gives a task to one person or several in their own line. The assignee accepts and hands in; the issuer can send work back with a reason. A task given to several people is one part per person, each with its own accept, hand-in, check and thread: the task stays in progress until every part is handed in, and the issuer hears at once how many are in. These are events over the status the tasks API reports, so the existing run sees each part as a task of its own | `tasks.py`, `actions.py`, `shared.py` |
 | **Brief and assistant** | A spec laid out as goal, requirements, limits and names, using only the author's sentences, with a list of what is missing (no number, a vague word, no named commands for an engineer). In a thread the assistant answers with sentences of the spec, copied exactly, or says it cannot | `brief.py`, `assistant.py` |
 | **Completion check** | When a task closes the assignee restates what it required: a teach-back question and fill-in-the-blank questions cut from the spec. Key terms decide first, the model is a second opinion, a sample is graded again by another model, and a split goes to the issuer | `quiz.py`, `grading.py`, `completion.py` |
 | **Code check** | The commands, options and routes a spec names are looked for in the engineer's code (`ast` for Python). A missing name becomes a question, never a verdict | `trace.py` |
@@ -763,12 +765,12 @@ count like a 503.
 pytest && ruff check src tests && ruff format --check src tests
 ```
 
-**667 tests.** The tasks API, the messaging provider
+**680 tests.** The tasks API, the messaging provider
 and the model are served in-process (`httpx2.MockTransport`), so the suite needs no network
 and no key. The Anthropic adapter is tested against a mocked Messages API: request shape,
 structured output config, thinking blocks, refusals, truncation, error classification.
 
-The team layer adds 380 of them. Besides the unit tests there is a five-day scenario through the
+The team layer adds 393 of them. Besides the unit tests there is a five-day scenario through the
 console and the run, two real processes that race for the run lock, a check that a run without an
 org file still writes the submitted `decisions.json`, and a mutation pass over the guards that
 matter (grounding, probation, the lock, route pinning, the identity in a request). `make
@@ -837,10 +839,11 @@ src/followup/
     ├── chat.py, assistant.py, calls.py  # threads, quote-or-abstain, phone calls
     ├── runner.py, ledger.py             # the team pass and its replay ledger
     ├── accounts.py, tasks.py, actions.py  # sign-in, tasks and moves, what a person may do
+    ├── shared.py                        # a task given to several people, read as one
     ├── context.py, dashboard.py         # the read model shared by console and app
     ├── cli.py, cli_db.py, calibrate_cli.py
     └── webapp.py, ui/index.html         # the app
-tests/                   # 667 tests, grouped by the module they pin
+tests/                   # 680 tests, grouped by the module they pin
 fixtures/tasks.json      # the supplied fixture
 fixtures/team/           # org, two days of tasks with specs, a scenario, a labelled set, a code tree
 docs/sample/             # artefacts of the demo runs
@@ -934,10 +937,10 @@ audit log is append-only.
   presence of a name is reported as a question for the engineer.
 - **One check per task and spec.** A task sent back and handed in again is not asked again
   unless its spec changed, and a person who is reopened in a thread keeps the old answers.
-- **One assignee per task.** A task has one owner, and a thread has one assignee and one issuer.
-  Two people on the same task, each giving their own account, and a rule for when the accounts
-  disagree are not built. It would take a table of assignees, a check per person and a way to
-  settle a split between them.
+- **The parts of a shared task do not know each other.** A task given to several people is one
+  part per person, and the parts share a status and a group id, nothing else. The service does not
+  compare what two assignees say, make one part wait for another or split the work, so two
+  accounts that disagree are for the issuer to read and settle.
 - **Status moves stay here.** Accept, hand in and send back are events over the tasks API; a
   tracker integration has to send them on.
 - **Voice is a delivery channel, not a speech engine.** The service sends the words and the

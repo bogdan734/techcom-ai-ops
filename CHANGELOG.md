@@ -22,6 +22,9 @@ already sent.
   from a run that disagrees with itself.
 - Personal accounts for the app (scrypt, lockout, HttpOnly sessions); issuers give tasks, assignees
   accept, hand in and are sent back; a brief and a list of gaps for every spec.
+- A task can be given to several people: one part per person, each with its own accept, hand-in,
+  check and thread, and the whole task stays in progress until every part is handed in. The
+  issuer hears at once how many are in; each person hears who shares the task.
 - Completion check: a teach-back quiz from the spec, graded by key terms with the model as a
   second opinion and an audit sample; a code check for the names a spec asks for.
 - Check levels from a result ledger (decayed Wilson bound, acceptance-sampling levels), hidden

@@ -24,6 +24,7 @@ class TaskExtras:
     assigned_by: str | None  # person id of the issuer
     code_path: str | None  # relative to the code root
     created: date | None
+    group: str | None = None  # the id the parts of a task given to several people share
 
 
 def load_extras(records: Sequence[Any], org: Org) -> dict[str, TaskExtras]:
@@ -62,10 +63,11 @@ def _extras(position: int, task_id: str, record: Mapping[str, Any], org: Org) ->
         assigned_by=_issuer(where, record.get("assigned_by"), org),
         code_path=_code_path(where, record.get("code_path")),
         created=_created(where, record.get("created")),
+        group=_group(where, record.get("group")),
     )
 
 
-_FIELDS = ("spec", "assigned_by", "code_path", "created")
+_FIELDS = ("spec", "assigned_by", "code_path", "created", "group")
 
 
 def _spec(where: str, value: Any) -> str:
@@ -94,6 +96,14 @@ def _code_path(where: str, value: Any) -> str | None:
     if path is None or path.is_absolute() or ".." in path.parts or not value.strip():
         raise ConfigError(f"{where}: code_path must be a relative path without '..'")
     return path.as_posix()
+
+
+def _group(where: str, value: Any) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise ConfigError(f"{where}: group must be the id the parts of the task share")
+    return " ".join(value.split()).upper()
 
 
 def _created(where: str, value: Any) -> date | None:

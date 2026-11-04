@@ -8,6 +8,7 @@ console report and the app.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from typing import Any
 
@@ -23,6 +24,7 @@ from .org import Capability, Person, Role
 from .pins import pinned
 from .quiz import Quiz, open_quiz
 from .schema import CONTROL
+from .shared import Shared, shared_tasks
 from .trust import Event, Ledger, standing
 
 
@@ -57,6 +59,8 @@ class CheckView:
     can_accept: bool = False
     can_submit: bool = False
     can_return: bool = False
+    # Set when the task was given to several people: how the whole task stands, part by part.
+    shared: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -129,12 +133,13 @@ def build_dashboard(ctx: Context, viewer: Person) -> Dashboard:
     issuer_capable = org.can(viewer.id, Capability.ISSUE_TASKS)
     line = org.below(viewer.id)
     moves = tasks_module.events(ctx.vault)
+    shared = shared_tasks(ctx.tasks, ctx.extras)
     mine: list[CheckView] = []
     issued: list[CheckView] = []
     for task in sorted(ctx.tasks, key=lambda t: t.task_id):
         owner = org.by_name(task.owner)
         issuer = issuer_of(task, ctx.extras.get(task.task_id), org)
-        view = _check_view(ctx, viewer, task, owner, issuer, moves)
+        view = _check_view(ctx, viewer, task, owner, issuer, moves, shared)
         if owner is not None and owner.id == viewer.id:
             mine.append(view)
         in_line = issuer_capable and (
@@ -206,7 +211,14 @@ def to_markdown(board: Dashboard) -> str:
 
 def _line(check: CheckView) -> str:
     extra = f"; not found in the code: {', '.join(check.missing)}" if check.missing else ""
-    return f"- {check.task_id} {check.title} ({check.task_status}): check {check.status}{extra}"
+    whole = (
+        f", shared: {check.shared['done']} of {check.shared['total']} handed in"
+        if check.shared
+        else ""
+    )
+    return (
+        f"- {check.task_id} {check.title} ({check.task_status}{whole}): check {check.status}{extra}"
+    )
 
 
 # -- builders ------------------------------------------------------------------------------
@@ -231,6 +243,7 @@ def _check_view(
     owner: Person | None,
     issuer: Person | None,
     moves: list[tasks_module.TaskEvent],
+    shared: Mapping[str, Shared],
 ) -> CheckView:
     own = owner is not None and owner.id == viewer.id
     is_issuer = issuer is not None and issuer.id == viewer.id
@@ -256,6 +269,7 @@ def _check_view(
         and task.status in (Status.NOT_STARTED, Status.BLOCKED, Status.UNKNOWN),
         "can_submit": own and not done,
         "can_return": is_issuer and done,
+        "shared": _shared_view(shared.get(extra.group) if extra and extra.group else None),
     }
     db = ctx.open(ctx.department(task))
     quiz = open_quiz(db, task.task_id, owner.id) if db is not None and owner else None
@@ -290,6 +304,21 @@ def _check_view(
         and status == "needs_review",
         **base,
     )
+
+
+def _shared_view(group: Shared | None) -> dict[str, Any] | None:
+    if group is None:
+        return None
+    return {
+        "group": group.group,
+        "status": group.status.value,
+        "done": group.done,
+        "total": len(group.parts),
+        "parts": [
+            {"task_id": p.task_id, "assignee": p.owner or "unassigned", "status": p.status.value}
+            for p in group.parts
+        ],
+    }
 
 
 def _status(ctx: Context, db, quiz: Quiz, answers: dict[str, str]) -> str:

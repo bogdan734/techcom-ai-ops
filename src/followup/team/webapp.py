@@ -292,7 +292,11 @@ class _Handler(BaseHTTPRequestHandler):
                 raise PermissionError("only a manager can move the days along")
             return self.app.advance()
         if path == "/api/assist/spec":
-            role = self._context().org.find(str(body.get("assignee", "")))
+            org = self._context().org
+            people = [p for p in map(org.find, _assignee_ids(body)) if p is not None]
+            # An engineer's task has to name commands, so one engineer among them decides.
+            chosen = next((p for p in people if p.role is Role.ENGINEER), None)
+            role = chosen or (people[0] if people else None)
             return structure(
                 str(body.get("spec", "")),
                 role.role.value if role else None,
@@ -327,16 +331,16 @@ class _Handler(BaseHTTPRequestHandler):
         elif path == "/api/ticket":
             return {"thread": actions.open_ticket(ctx, viewer, text("text"))}
         elif path == "/api/task/new":
-            task = actions.create_task(
+            made = actions.create_task(
                 ctx,
                 viewer,
                 title=text("title"),
-                assignee_id=text("assignee"),
+                assignee_ids=_assignee_ids(body),
                 spec=text("spec"),
                 project=text("project") or "General",
                 due=text("due"),
             )
-            return {"task": task}
+            return {"tasks": made}
         elif path == "/api/task/accept":
             actions.accept_task(ctx, viewer, text("task"))
         elif path == "/api/task/submit":
@@ -473,6 +477,13 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Security-Policy", CSP)
         self.end_headers()
         self.wfile.write(raw)
+
+
+def _assignee_ids(body: dict) -> list[str]:
+    ids = body.get("assignees", [])
+    if not isinstance(ids, list):
+        raise ActionError("assignees is a list of people")
+    return [str(person_id) for person_id in ids]
 
 
 def _person(person: Person) -> dict[str, str]:

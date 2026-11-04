@@ -131,6 +131,10 @@ input, select, textarea { width: 100%; padding: 8px 11px; border-radius: 11px; b
 textarea { resize: vertical; min-height: 56px; }
 label { display: grid; gap: 4px; font-size: 12.5px; color: var(--dim); font-weight: 550; }
 .fields { display: grid; gap: 8px; } .two { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.field { display: grid; gap: 4px; } .cap { font-size: 12.5px; color: var(--dim); font-weight: 550; }
+.people { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; max-height: 190px; overflow: auto; }
+.pick { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 10px; background: var(--field); border: 1px solid var(--edge); color: inherit; font-size: 13px; cursor: pointer; }
+.pick input { width: 16px; height: 16px; padding: 0; flex: none; } .pick small { color: var(--dim); }
 .drawer-bg { position: fixed; inset: 0; background: rgba(3,4,10,.45); backdrop-filter: blur(2px); z-index: 20; opacity: 0; pointer-events: none; transition: opacity .2s; }
 .drawer-bg.on { opacity: 1; pointer-events: auto; }
 .drawer { position: fixed; top: 8px; right: 8px; bottom: 8px; width: min(520px, calc(100vw - 16px)); z-index: 21; padding: 16px 18px; overflow: auto; transform: translateX(108%); transition: transform .26s var(--ease); border-radius: 1.4rem; background: var(--surface); }
@@ -197,8 +201,9 @@ const I18N = {
     chat: "Chat", writeMsg: "Write a message", sendMsg: "Send", ask: "Ask a question", support: "Support", threads: "Conversations",
     waiting: "Waiting", markDone: "Mark done", doneThreads: "Done ({n})", noThreads: "No conversations yet.",
     assistant: "Assistant · from the task text", sentToYou: "Sent to you",
-    title: "Title", assignee: "Assign to", project: "Project", dueDate: "Due date", spec: "What has to be done",
-    create: "Give the task", created: "Task {id} created. {name} hears about it on the next run.",
+    title: "Title", assignee: "Assign to (one or more)", project: "Project", dueDate: "Due date", spec: "What has to be done",
+    create: "Give the task", created: "Task {id} created. The next run tells {name}.",
+    sharedTask: "Shared task", handedInOf: "{done} of {total} handed in",
     helper: "Assistant", helperHint: "Write the task; the assistant lays it out and says what is missing.", looksGood: "Nothing missing.", gaps: "Missing",
     levels: "Check levels", person: "Person", role: "Role", level: "Level", results: "Results", open2: "Open tasks", checks: "Checks",
     hiddenLevels: "Check levels are hidden here. They still decide how many questions people get.", noLine: "Nobody reports to you.",
@@ -231,8 +236,9 @@ const I18N = {
     chat: "Чат", writeMsg: "Напишите сообщение", sendMsg: "Отправить", ask: "Задать вопрос", support: "Поддержка", threads: "Беседы",
     waiting: "Ждёт", markDone: "Готово", doneThreads: "Готово ({n})", noThreads: "Бесед пока нет.",
     assistant: "Помощник · из текста задачи", sentToYou: "Вам отправлено",
-    title: "Название", assignee: "Кому", project: "Проект", dueDate: "Срок", spec: "Что нужно сделать",
-    create: "Выдать задачу", created: "Задача {id} создана. {name} узнает при следующем запуске.",
+    title: "Название", assignee: "Кому (можно нескольким)", project: "Проект", dueDate: "Срок", spec: "Что нужно сделать",
+    create: "Выдать задачу", created: "Задача {id} создана. При следующем запуске узнают: {name}.",
+    sharedTask: "Общая задача", handedInOf: "Сдали {done} из {total}",
     helper: "Помощник", helperHint: "Напишите задачу; помощник разложит её и подскажет, чего не хватает.", looksGood: "Всё на месте.", gaps: "Не хватает",
     levels: "Уровни проверки", person: "Человек", role: "Роль", level: "Уровень", results: "Результатов", open2: "Открытых задач", checks: "Проверки",
     hiddenLevels: "Уровни проверки скрыты. Они всё равно решают, сколько вопросов получает человек.", noLine: "Вам никто не подчиняется.",
@@ -265,8 +271,9 @@ const I18N = {
     chat: "Чат", writeMsg: "Напишіть повідомлення", sendMsg: "Надіслати", ask: "Поставити питання", support: "Підтримка", threads: "Розмови",
     waiting: "Чекає", markDone: "Готово", doneThreads: "Готово ({n})", noThreads: "Розмов поки немає.",
     assistant: "Помічник · з тексту завдання", sentToYou: "Вам надіслано",
-    title: "Назва", assignee: "Кому", project: "Проєкт", dueDate: "Строк", spec: "Що треба зробити",
-    create: "Видати завдання", created: "Завдання {id} створено. {name} дізнається при наступному запуску.",
+    title: "Назва", assignee: "Кому (можна кільком)", project: "Проєкт", dueDate: "Строк", spec: "Що треба зробити",
+    create: "Видати завдання", created: "Завдання {id} створено. При наступному запуску дізнаються: {name}.",
+    sharedTask: "Спільне завдання", handedInOf: "Здали {done} з {total}",
     helper: "Помічник", helperHint: "Напишіть завдання; помічник розкладе його й підкаже, чого бракує.", looksGood: "Усе на місці.", gaps: "Бракує",
     levels: "Рівні перевірки", person: "Людина", role: "Роль", level: "Рівень", results: "Результатів", open2: "Відкритих завдань", checks: "Перевірки",
     hiddenLevels: "Рівні перевірки приховано. Вони все одно визначають, скільки питань отримує людина.", noLine: "Вам ніхто не підпорядковується.",
@@ -382,7 +389,7 @@ function overview() {
   ${open.length ? html`<h3>${t("yourTasks")}</h3>${rows(open)}` : ""}`;
 }
 function rows(list) {
-  return html`<div class="rows">${list.map(c => html`<button class="row" data-act="task" data-arg="${c.task_id}"><span><b>${c.task_id} · ${c.title}</b><small>${c.project}</small></span><span><small>${c.assignee}${c.issuer ? " ← " + c.issuer : ""}</small></span><small>${c.due ? t("due") + " " + c.due.slice(5) : ""}</small>${chip("", c.task_status)}${checkChip(c)}</button>`)}</div>`;
+  return html`<div class="rows">${list.map(c => html`<button class="row" data-act="task" data-arg="${c.task_id}"><span><b>${c.task_id} · ${c.title}</b><small>${c.project}${c.shared ? " · 👥 " + t("handedInOf", { done: c.shared.done, total: c.shared.total }) : ""}</small></span><span><small>${c.assignee}${c.issuer ? " ← " + c.issuer : ""}</small></span><small>${c.due ? t("due") + " " + c.due.slice(5) : ""}</small>${chip("", c.task_status)}${checkChip(c)}</button>`)}</div>`;
 }
 function section(title, list) {
   const keep = c => (S.filter === "all" || (S.filter === "open" ? c.task_status !== "Done" : c.task_status === "Done")) && (!S.q || (c.task_id + c.title + c.assignee).toLowerCase().includes(S.q.toLowerCase()));
@@ -438,6 +445,7 @@ function taskPanel(c) {
     ${c.can_review ? html`<form data-form="review" data-arg="${c.task_id}"><label>${t("note")}<input name="note"></label><div class="actions"><button class="btn good" data-accept="1">${t("accept2")}</button><button class="btn bad" data-accept="0">${t("reject")}</button></div></form>` : ""}</div>` : "";
   return html`<button class="btn x small" data-act="close" aria-label="close">✕</button><h2>${c.task_id} · ${c.title}</h2>
   <div class="sub">${c.assignee}${c.issuer ? " ← " + c.issuer : ""} · ${c.project}${c.due ? " · " + t("due") + " " + c.due : ""}</div><div>${chip("", c.task_status)} ${checkChip(c)}</div>
+  ${c.shared ? html`<div class="sect"><h3>👥 ${t("sharedTask")} ${chip(c.shared.status === "Done" ? "ok" : "info", c.shared.status + " · " + t("handedInOf", { done: c.shared.done, total: c.shared.total }))}</h3><div class="rows">${c.shared.parts.map(p => html`<div class="row plain" style="grid-template-columns:minmax(0,1fr) auto"><span><b>${p.assignee}</b><small>${p.task_id}</small></span>${chip(p.status === "Done" ? "ok" : "", p.status)}</div>`)}</div></div>` : ""}
   <div class="actions">${c.can_accept ? html`<button class="btn primary" data-act="accept" data-arg="${c.task_id}">▶ ${t("accept")}</button>` : ""}${c.can_submit ? html`<button class="btn ${c.can_accept ? "" : "primary"}" data-act="submit" data-arg="${c.task_id}">✓ ${t("handIn")}</button>` : ""}</div>
   ${c.can_return ? html`<form class="compose" data-form="return" data-arg="${c.task_id}"><input name="note" placeholder="${t("why")}" required><button class="btn bad">↩ ${t("sendBack")}</button></form>` : ""}
   ${c.brief ? html`<div class="sect"><h3>${t("brief")}</h3>${briefHtml(c.brief)}</div>` : ""}${quiz}
@@ -445,14 +453,16 @@ function taskPanel(c) {
     <form class="compose" data-form="say" data-arg="${c.task_id}"><input name="text" placeholder="${t("writeMsg")}" required autocomplete="off"><button class="btn primary">${t("sendMsg")}</button></form></div>`;
 }
 function newTaskPanel() {
-  const b = S.board, d = S.draft || (S.draft = { title: "", assignee: b.assignable[0]?.id || "", project: "", due: "", spec: "" });
+  const b = S.board, d = S.draft || (S.draft = { title: "", assignees: b.assignable.slice(0, 1).map(p => p.id), project: "", due: "", spec: "" });
   return html`<button class="btn x small" data-act="close" aria-label="close">✕</button><h2>${t("newTask")}</h2>
-  <form data-form="new" class="fields"><div class="two"><label>${t("title")}<input name="title" value="${d.title}" required></label><label>${t("assignee")}<select name="assignee">${b.assignable.map(p => html`<option value="${p.id}" ${p.id === d.assignee ? "selected" : ""}>${p.name} · ${p.role.replace("_", " ")}</option>`)}</select></label></div>
+  <form data-form="new" class="fields"><label>${t("title")}<input name="title" value="${d.title}" required></label>
+  <div class="field"><span class="cap">${t("assignee")}</span><div class="people">${b.assignable.map(p => html`<label class="pick"><input type="checkbox" name="assignee" value="${p.id}" ${d.assignees.includes(p.id) ? "checked" : ""}><span>${p.name} <small>${p.role.replace("_", " ")}</small></span></label>`)}</div></div>
   <div class="two"><label>${t("project")}<input name="project" value="${d.project}"></label><label>${t("dueDate")}<input name="due" type="date" value="${d.due}"></label></div>
   <label>${t("spec")}<textarea name="spec" rows="6" required>${d.spec}</textarea></label>
   <div class="sect" style="margin-top:2px"><h3>✨ ${t("helper")}</h3><div id="live">${liveBrief(null)}</div></div>
   <button class="btn primary" style="justify-content:center">${t("create")}</button></form>`;
 }
+const picked = form => [...form.querySelectorAll("input[name=assignee]:checked")].map(x => x.value);
 function liveBrief(br) {
   if (!br) return html`<p class="sub" style="margin:0">${t("helperHint")}</p>`;
   return html`${briefHtml(br)}${br.gaps.length ? html`<h3>${t("gaps")}</h3><ul class="gaps">${br.gaps.map(g => html`<li>${g}</li>`)}</ul>` : html`<p class="sub">✓ ${t("looksGood")}</p>`}`;
@@ -511,9 +521,9 @@ let assistTimer;
 document.addEventListener("input", e => {
   if (e.target.dataset.act === "search") { S.q = e.target.value; const v = $("#view"); const pos = e.target.selectionStart; v.innerHTML = view().s; const i = $("input[data-act=search]"); i.focus(); i.setSelectionRange(pos, pos); return; }
   const form = e.target.closest("form[data-form=new]"); if (!form) return;
-  S.draft = { title: form.title.value, assignee: form.assignee.value, project: form.project.value, due: form.due.value, spec: form.spec.value };
+  S.draft = { title: form.title.value, assignees: picked(form), project: form.project.value, due: form.due.value, spec: form.spec.value };
   clearTimeout(assistTimer);
-  assistTimer = setTimeout(async () => { try { const br = await api("/api/assist/spec", { spec: S.draft.spec, assignee: S.draft.assignee, due: S.draft.due }); const live = $("#live"); if (live && S.draft.spec.trim()) live.innerHTML = liveBrief(br).s; } catch (x) {} }, 450);
+  assistTimer = setTimeout(async () => { try { const br = await api("/api/assist/spec", { spec: S.draft.spec, assignees: S.draft.assignees, due: S.draft.due }); const live = $("#live"); if (live && S.draft.spec.trim()) live.innerHTML = liveBrief(br).s; } catch (x) {} }, 450);
 });
 document.addEventListener("submit", async e => {
   const form = e.target.closest("form[data-form]"); if (!form) return; e.preventDefault();
@@ -525,7 +535,7 @@ document.addEventListener("submit", async e => {
   if (kind === "return") return act(() => api("/api/task/return", { task: arg, note: form.note.value }), t("sentBack"));
   if (kind === "ask") return act(() => api("/api/chat", { task: form.task.value, text }).then(r => { S.tab = "messages"; S.thread = r.thread; }), t("sent"));
   if (kind === "ticket") return act(() => api("/api/ticket", { text }).then(r => { S.tab = "messages"; S.thread = r.thread; }), t("ticketOpened"));
-  if (kind === "new") { const who = S.board.assignable.find(p => p.id === form.assignee.value); return act(() => api("/api/task/new", { title: form.title.value, assignee: form.assignee.value, project: form.project.value, due: form.due.value, spec: form.spec.value }).then(r => toast(t("created", { id: r.task, name: who?.name || "" }), "ok")), ""); }
+  if (kind === "new") { const ids = picked(form), who = S.board.assignable.filter(p => ids.includes(p.id)).map(p => p.name).join(", "); return act(() => api("/api/task/new", { title: form.title.value, assignees: ids, project: form.project.value, due: form.due.value, spec: form.spec.value }).then(r => toast(t("created", { id: r.tasks.join(", "), name: who }), "ok")), ""); }
 });
 document.addEventListener("keydown", e => { if (e.key === "Escape") { S.pop = null; closeDrawer(); render(); } });
 init().catch(e => { document.body.insertAdjacentHTML("beforeend", `<p style="padding:24px">${esc(e.message)}</p>`); });

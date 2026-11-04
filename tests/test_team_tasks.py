@@ -59,9 +59,8 @@ def test_effective_records_apply_the_latest_move_and_the_authored_tasks(tmp_path
 
 def test_an_issuer_gives_a_task_and_the_assignee_hears_on_the_next_run(tmp_path):
     ctx = started(tmp_path)
-    task_id = create_task(ctx, person(ctx, "max"), assignee_id="eve", **NEW)
-    assert task_id == "APP-0001"
-    assert create_task(ctx, person(ctx, "max"), assignee_id="finn", **NEW) == "APP-0002"
+    assert create_task(ctx, person(ctx, "max"), assignee_ids=["eve"], **NEW) == ["APP-0001"]
+    assert create_task(ctx, person(ctx, "max"), assignee_ids=["finn"], **NEW) == ["APP-0002"]
     run_day(tmp_path, world_records(), "2026-10-21")
     assert any(
         b.startswith("New task APP-0001: Label the splice closures")
@@ -78,11 +77,11 @@ def test_an_issuer_gives_a_task_and_the_assignee_hears_on_the_next_run(tmp_path)
 def test_only_an_issuer_gives_tasks_and_only_to_their_own_line(tmp_path):
     ctx = started(tmp_path)
     with pytest.raises(ActionError, match="may not give tasks"):
-        create_task(ctx, person(ctx, "eve"), assignee_id="finn", **NEW)
+        create_task(ctx, person(ctx, "eve"), assignee_ids=["finn"], **NEW)
     with pytest.raises(ActionError, match="own line"):
-        create_task(ctx, person(ctx, "max"), assignee_id="sue", **NEW)
+        create_task(ctx, person(ctx, "max"), assignee_ids=["sue"], **NEW)
     with pytest.raises(ActionError, match="own line"):
-        create_task(ctx, person(ctx, "max"), assignee_id="sid", **NEW)
+        create_task(ctx, person(ctx, "max"), assignee_ids=["sid"], **NEW)
     assert board(ctx, "eve").assignable == ()
 
 
@@ -94,7 +93,7 @@ def test_a_task_needs_a_title_a_spec_and_a_real_date(tmp_path):
         ({"due": "next week"}, "YYYY-MM-DD"),
     ):
         with pytest.raises(ActionError, match=match):
-            create_task(ctx, person(ctx, "max"), assignee_id="eve", **{**NEW, **bad})
+            create_task(ctx, person(ctx, "max"), assignee_ids=["eve"], **{**NEW, **bad})
 
 
 def test_the_assignee_accepts_hands_in_and_the_issuer_sees_each_step(tmp_path):

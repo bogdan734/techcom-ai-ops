@@ -22,6 +22,7 @@ from followup.models import Action, Decision, Status, Task
 
 from .extras import TaskExtras
 from .org import Org, Person
+from .shared import Shared
 from .spec_terms import requirement_sentences, sentences, spec_hash
 
 ACTIVATED = "team_activated_on"
@@ -53,7 +54,8 @@ class Kind(StrEnum):
 
 _TEMPLATES: Mapping[Kind, str] = {
     Kind.NEW_TASK: (
-        "New task {task_id}: {title} ({project}), due {due}. Issued by {issuer}.{requirements}"
+        "New task {task_id}: {title} ({project}), due {due}. "
+        "Issued by {issuer}.{shared}{requirements}"
     ),
     Kind.SPEC_CHANGED: (
         "The spec of {task_id} ({title}) changed.\nAdded: {added}\nRemoved: {removed}"
@@ -221,8 +223,12 @@ def lifecycle_notices(
     org: Org,
     today: date,
     window_days: int,
+    shared: Shared | None = None,
 ) -> list[Message]:
-    """New task, changed spec, closed task and what is next, for one task."""
+    """New task, changed spec, closed task and what is next, for one task.
+
+    ``shared`` is the task as a whole when this one is a part of a task given to several people.
+    """
     owner = org.by_name(task.owner)
     if owner is None or not rows:
         return []
@@ -241,11 +247,14 @@ def lifecycle_notices(
         due = task.due_date.isoformat() if task.due_date else "no date"
         spec = extras.spec if extras else ""
         points = requirement_sentences(spec)[:3] or sentences(spec)[:1]
+        parts = shared.parts if shared else ()
+        others = [p.owner for p in parts if p.owner and p.owner != task.owner]
         facts = {
             **base,
             "project": task.project,
             "due": due,
             "issuer": issuer_name,
+            "shared": f" Shared with {', '.join(others)}." if others else "",
             "requirements": "".join(f"\n- {point}" for point in points),
         }
         messages.append(
@@ -285,7 +294,10 @@ def lifecycle_notices(
 
     closed = [r for r in statuses if r.value == Status.DONE.value and not r.on_activation]
     if closed and task.status is Status.DONE:
+        # What follows "closed": the check for the assignee, and how the whole task stands.
         check = " The completion check follows." if extras and extras.spec else ""
+        if shared is not None:
+            check += _progress(shared)
         if issuer is not None:
             facts = {**base, "assignee": owner.name, "check": check}
             messages.append(
@@ -309,6 +321,13 @@ def lifecycle_notices(
             )
         )
     return messages
+
+
+def _progress(shared: Shared) -> str:
+    total = len(shared.parts)
+    if shared.status is Status.DONE:
+        return f" All {total} have handed in, so the task is done."
+    return f" {shared.done} of {total} have handed in, so the task stays in progress."
 
 
 def _next_open(task: Task, candidates: Sequence[Task]) -> Task | None:

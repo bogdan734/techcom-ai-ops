@@ -236,14 +236,14 @@ def test_giving_taking_handing_in_and_sending_back_a_task(app):
     max_, eve = app.client("max"), app.client("eve")
     new = {
         "title": "Label the closures",
-        "assignee": "eve",
+        "assignees": ["eve"],
         "spec": SPEC,
         "project": "SURF Illinois",
         "due": "2026-10-30",
     }
     assert eve.call("POST", "/api/task/new", new)[0] == 400  # not an issuer
     status, made = max_.call("POST", "/api/task/new", new)
-    assert status == 200 and made["task"] == "APP-0001"
+    assert status == 200 and made["tasks"] == ["APP-0001"]
     mine = eve.call("GET", "/api/me")[1]["mine"]
     task = next(c for c in mine if c["task_id"] == "APP-0001")
     assert task["can_accept"] and task["brief"]["goal"].startswith("Install four handholes")
@@ -259,10 +259,45 @@ def test_giving_taking_handing_in_and_sending_back_a_task(app):
     assert after["task_status"] == "Working on it"
 
 
+def test_one_task_goes_to_several_people_and_each_sees_how_far_it_is(app):
+    play(app, 1)
+    max_, eve, finn = app.client("max"), app.client("eve"), app.client("finn")
+    new = {
+        "title": "Label the closures",
+        "assignees": ["eve", "finn"],
+        "spec": SPEC,
+        "project": "SURF Illinois",
+        "due": "2026-10-30",
+    }
+    status, made = max_.call("POST", "/api/task/new", new)
+    assert status == 200 and made["tasks"] == ["APP-0001", "APP-0002"]
+    part = next(c for c in eve.call("GET", "/api/me")[1]["mine"] if c["task_id"] == "APP-0001")
+    assert (part["shared"]["status"], part["shared"]["done"], part["shared"]["total"]) == (
+        "Not Started",
+        0,
+        2,
+    )
+    assert eve.call("POST", "/api/task/submit", {"task": "APP-0001"})[0] == 200
+    mine = finn.call("GET", "/api/me")[1]["mine"]
+    seen = next(c for c in mine if c["task_id"] == "APP-0002")["shared"]
+    assert (seen["status"], seen["done"]) == ("Working on it", 1)
+    for bad in ("eve", [], ["eve", "sue"]):
+        assert max_.call("POST", "/api/task/new", {**new, "assignees": bad})[0] == 400
+
+
+def test_the_assistant_asks_for_commands_when_an_engineer_is_among_the_assignees(app):
+    max_ = app.client("max")
+    body = {"spec": "Fix the cable soon.", "due": ""}
+    named = max_.call("POST", "/api/assist/spec", {**body, "assignees": ["finn", "eve"]})[1]
+    assert any("Name the commands" in g for g in named["gaps"])
+    field_only = max_.call("POST", "/api/assist/spec", {**body, "assignees": ["finn"]})[1]
+    assert not any("Name the commands" in g for g in field_only["gaps"])
+
+
 def test_the_spec_assistant_structures_the_text_and_asks_what_is_missing(app):
     max_ = app.client("max")
     status, brief = max_.call(
-        "POST", "/api/assist/spec", {"spec": "Fix the cable soon.", "assignee": "eve", "due": ""}
+        "POST", "/api/assist/spec", {"spec": "Fix the cable soon.", "assignees": ["eve"], "due": ""}
     )
     assert status == 200 and brief["goal"] == "Fix the cable soon."
     assert any("'soon'" in g for g in brief["gaps"]) and any(
