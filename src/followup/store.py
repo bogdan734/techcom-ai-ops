@@ -190,6 +190,28 @@ class Store:
             (error, _now(), action_id),
         )
 
+    def actions_in(self, status: str) -> list[StoredAction]:
+        """Oldest first. created_at has a resolution of one second, so the id breaks ties."""
+        rows = self.db.execute(
+            f"SELECT {_ACTION_COLUMNS} FROM actions WHERE status = ? "
+            "ORDER BY created_at, action_id",
+            (status,),
+        ).fetchall()
+        return [_stored(row) for row in rows]
+
+    def requeue(self, action_id: str) -> bool:
+        """Release a dead action for the next run; False if it is not dead.
+
+        Attempts are kept on purpose: the request that parked it may have been delivered after
+        all, so the next run asks the provider before it resends anything.
+        """
+        released = self.db.execute(
+            "UPDATE actions SET status = 'pending', failures = 0, updated_at = ? "
+            "WHERE action_id = ? AND status = 'dead'",
+            (_now(), action_id),
+        )
+        return released.rowcount == 1
+
     # -- note readings -----------------------------------------------------
 
     def get_reading(self, cache_key: str) -> dict[str, Any] | None:

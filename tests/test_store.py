@@ -213,3 +213,39 @@ def test_mark_failed_counts_failed_runs(tmp_path):
     with closing(Store(path)) as reopened:
         # Opening a database that is already current rebuilds nothing, so the count survives.
         assert reopened.get_action("act-1").failures == 2
+
+
+def test_actions_in_lists_one_status_oldest_first(tmp_path):
+    with closing(Store(tmp_path / "state.db")) as store:
+        # created_at has a resolution of one second, so the id has to break ties.
+        for action_id, created_at in (
+            ("dead-b", NOW),
+            ("dead-a", NOW),
+            ("dead-old", "2026-10-20T08:00:00+00:00"),
+        ):
+            store.claim(action(action_id))
+            store.mark_dead(action_id, "HTTP 400")
+            store.db.execute(
+                "UPDATE actions SET created_at = ? WHERE action_id = ?", (created_at, action_id)
+            )
+        store.claim(action("waiting"))
+
+        listed = [stored.action.action_id for stored in store.actions_in("dead")]
+
+    assert listed == ["dead-old", "dead-a", "dead-b"]
+
+
+def test_requeue_releases_only_dead_actions(tmp_path):
+    with closing(Store(tmp_path / "state.db")) as store:
+        store.claim(action("dead-1"))
+        store.claim(action("pending-1"))
+        store.start_attempt("dead-1")
+        store.start_attempt("dead-1")
+        store.mark_failed("dead-1", "HTTP 503")
+        store.mark_dead("dead-1", "HTTP 400")
+
+        assert store.requeue("dead-1") is True
+        released = store.get_action("dead-1")
+        # Attempts stay, so the next run asks the provider before it resends anything.
+        assert (released.status, released.failures, released.attempts) == ("pending", 0, 2)
+        assert store.requeue("pending-1") is False

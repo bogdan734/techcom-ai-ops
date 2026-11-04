@@ -232,3 +232,15 @@ def test_dead_action_is_never_posted_or_looked_up_again(store):
 
     assert again.status == "dead"
     assert backend.calls == calls
+
+
+def test_requeued_action_is_reconciled_before_any_resend(store):
+    backend = MockBackend([], faults={"send": ["timeout-after-commit"], "lookup": ["503"] * 4})
+    first = parking_outbox(store, backend, 1).deliver(action())
+    assert first.status == "dead"  # the request went through, but nobody could confirm it
+
+    assert store.requeue("act-1")
+    again = parking_outbox(store, backend, 1).deliver(action())
+
+    assert again.status == "reconciled"
+    assert len(posts(backend)) == 1

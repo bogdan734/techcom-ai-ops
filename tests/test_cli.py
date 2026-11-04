@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import getpass
 import json
+from contextlib import closing
 
 from conftest import FIXTURE
 from followup.cli import main
+from followup.models import Action, Decision
+from followup.store import Store
 
 
 def test_run_writes_decisions_delivery_and_audit_logs(tmp_path, capsys):
@@ -58,3 +62,63 @@ def test_missing_fixture_is_a_configuration_error(tmp_path, capsys):
 
     assert code == 1
     assert "cannot read tasks fixture" in capsys.readouterr().err
+
+
+def action(action_id: str) -> Action:
+    return Action(
+        action_id=action_id,
+        task_id="TC-1001",
+        decision=Decision.FOLLOW_UP_OWNER,
+        target="John Smith",
+        reason="Overdue by 3 days",
+        message="Hi John, TC-1001 is 3 days overdue. Please reply with the status.",
+        drafted_by="template",
+    )
+
+
+def test_list_and_requeue_dead_actions(tmp_path, capsys, monkeypatch):
+    out = tmp_path / "out"
+    with closing(Store(out / "state.db")) as store:
+        store.claim(action("act-dead"))
+        store.claim(action("act-waiting"))
+        store.start_attempt("act-dead")
+        store.start_attempt("act-dead")
+        store.mark_failed("act-dead", "HTTP 503")
+        store.mark_dead("act-dead", "HTTP 400: bad recipient")
+    monkeypatch.setattr(getpass, "getuser", lambda: "ops")
+
+    assert main(["list", "dead", "--out", str(out)]) == 0
+    assert capsys.readouterr().out == (
+        f"act-dead TC-1001 {Decision.FOLLOW_UP_OWNER.value} -> John Smith | "
+        "attempts 2, failed runs 1 | HTTP 400: bad recipient\n"
+        "    Hi John, TC-1001 is 3 days overdue. Please reply with the status.\n"
+    )
+
+    assert main(["requeue", "act-dead", "--out", str(out)]) == 0
+    events = [json.loads(line) for line in (out / "audit.jsonl").read_text().splitlines()]
+    requeued = [event for event in events if event["event"] == "action_requeued"]
+    assert [(event["action_id"], event["by"]) for event in requeued] == [("act-dead", "ops")]
+    assert requeued[0]["run_id"]
+
+    assert main(["requeue", "act-dead", "--out", str(out)]) == 1
+    assert "act-dead is not a dead letter" in capsys.readouterr().err
+
+
+def test_list_without_state_is_an_error_and_creates_nothing(tmp_path, capsys):
+    out = tmp_path / "out"
+
+    code = main(["list", "dead", "--out", str(out)])
+
+    assert code == 1
+    assert f"followup: no state at {out / 'state.db'}" in capsys.readouterr().err
+    assert not out.exists()
+
+
+def test_requeue_without_state_is_an_error_and_creates_nothing(tmp_path, capsys):
+    out = tmp_path / "out"
+
+    code = main(["requeue", "act-1", "--out", str(out)])
+
+    assert code == 1
+    assert f"followup: no state at {out / 'state.db'}" in capsys.readouterr().err
+    assert not out.exists()  # not even the audit log: nothing was requeued
