@@ -255,3 +255,20 @@ def test_outbox_never_posts_an_action_awaiting_approval(store):
     assert delivery.status == "awaiting_approval"
     assert backend.calls == []  # not even a lookup
     assert store.get_action("act-1").status == "awaiting_approval"
+
+
+def test_a_rejection_after_a_concurrent_delivery_is_not_reported_as_dead(store, monkeypatch):
+    backend = MockBackend([], faults={"send": ["400"]})
+    box = parking_outbox(store, backend, 3)
+    real_send = box._send
+
+    def another_run_delivers_first(act):
+        store.mark_sent(act.action_id, "msg-9")
+        return real_send(act)
+
+    monkeypatch.setattr(box, "_send", another_run_delivers_first)
+
+    delivery = box.deliver(action())
+
+    assert delivery.status == "failed"
+    assert store.get_action("act-1").status == "sent"

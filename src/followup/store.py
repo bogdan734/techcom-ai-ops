@@ -211,13 +211,17 @@ class Store:
         ).fetchone()
         return row[0]
 
-    def mark_dead(self, action_id: str, error: str) -> None:
-        """Park the action: it is never posted again. Guarded like ``mark_failed``."""
-        self.db.execute(
+    def mark_dead(self, action_id: str, error: str) -> bool:
+        """Park the action: it is never posted again. Guarded like ``mark_failed``.
+
+        False when the row was no longer waiting for delivery, so nothing was parked.
+        """
+        cursor = self.db.execute(
             "UPDATE actions SET status = 'dead', last_error = ?, updated_at = ? "
             "WHERE action_id = ? AND status IN ('pending', 'failed')",
             (error, _now(), action_id),
         )
+        return cursor.rowcount > 0
 
     def actions_in(self, status: str) -> list[StoredAction]:
         """Oldest first. created_at has a resolution of one second, so the id breaks ties."""

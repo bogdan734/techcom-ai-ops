@@ -78,8 +78,10 @@ class Outbox:
             failures = self.store.mark_failed(action.action_id, str(exc))
             self.breaker.record_failure()
             rejected = isinstance(exc, Rejected)
-            if self.max_failed_runs and (rejected or failures >= self.max_failed_runs):
-                self.store.mark_dead(action.action_id, str(exc))
+            dead = self.max_failed_runs and (rejected or failures >= self.max_failed_runs)
+            # Not parked when the row left pending/failed meanwhile (a concurrent run delivered
+            # it): the failure is then reported like any other.
+            if dead and self.store.mark_dead(action.action_id, str(exc)):
                 emit(
                     "dead_letter",
                     f"{action.task_id}: parked as a dead letter, not sent again ({exc})",
