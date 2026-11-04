@@ -100,3 +100,65 @@ def make_vault(tmp: Path, visibility: str = "issuers", names: Sequence[str] | No
     for name in names if names is not None else vault.known():
         vault.create(name)
     return vault
+
+
+SPEC = (
+    "Install four handholes along Elm Street. "
+    "The crew must record GPS coordinates for each handhole. "
+    "Splice loss should stay under 0.5 dB."
+)
+
+
+def world_records(status="Working on it", more=()):
+    """Eve (engineer) has a task with a spec; Finn (field) is blocked and gets a follow-up."""
+    from conftest import raw_task
+
+    return [
+        raw_task(
+            task_id="TC-1",
+            assigned_to="Eve Engineer",
+            status=status,
+            spec=SPEC,
+            assigned_by="max",
+            due_date="2026-10-30",
+            notes="On schedule.",
+        ),
+        raw_task(
+            task_id="TC-2",
+            assigned_to="Finn Field",
+            status="Blocked",
+            last_update="2026-10-15",
+            notes="Awaiting materials from warehouse; delivery date unknown.",
+            due_date="2026-10-18",
+        ),
+        *more,
+    ]
+
+
+def world_settings(tmp: Path, records, today="2026-10-21", **env):
+    """Base settings with an org file, the way the CLI builds them."""
+    from followup.config import Settings
+
+    (tmp / "tasks.json").write_text(json.dumps(records))
+    values = {
+        "TASKS_FILE": str(tmp / "tasks.json"),
+        "OUT_DIR": str(tmp / "out"),
+        "EVALUATION_DATE": today,
+        "ORG_FILE": str(write_org(tmp / "cfg")),
+        "CALL_TIME": "10:00",
+        "AUDIT_RATE": "0",
+        **env,
+    }
+    return Settings.from_env(values)
+
+
+def run_day(tmp: Path, records, today="2026-10-21", faults=None, **env):
+    from followup.pipeline import run
+
+    return run(world_settings(tmp, records, today, **env), faults)
+
+
+def world_context(tmp: Path, records, today="2026-10-21", **env):
+    from followup.team.context import load_context
+
+    return load_context(world_settings(tmp, records, today, **env))

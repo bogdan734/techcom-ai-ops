@@ -53,6 +53,10 @@ class Vault:
         """Names that have a file now."""
         return tuple(name for name in self.known() if self.path(name).exists())
 
+    def departments(self) -> tuple[str, ...]:
+        """Names with a file now, the control file left out: these hold tasks and chat."""
+        return tuple(name for name in self.names() if name != CONTROL)
+
     def create(self, name: str) -> None:
         final = self.path(name)
         if final.exists():

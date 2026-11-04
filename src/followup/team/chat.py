@@ -107,14 +107,14 @@ def post(
         "VALUES (?, ?, ?, ?, ?, ?, ?)",
         (mid, thread, author, clean, quote, int(flagged), day.isoformat()),
     )
-    return next(p for p in _posts(db, thread) if p.message_id == mid)
+    return next(p for p in posts_of(db, thread) if p.message_id == mid)
 
 
 def read_thread(db: sqlite3.Connection, thread: str, viewer: str) -> list[Post]:
     """The row filter: only members read a thread."""
     if viewer not in members_of(db, thread):
         raise PermissionError(f"{viewer} is not in thread {thread}")
-    return _posts(db, thread)
+    return posts_of(db, thread)
 
 
 def pending_questions(db: sqlite3.Connection) -> list[Pending]:
@@ -122,7 +122,7 @@ def pending_questions(db: sqlite3.Connection) -> list[Pending]:
     found = []
     for tid, kind, task_id, _ in _threads(db):
         members = members_of(db, tid)
-        waiting = _waiting(_posts(db, tid), members)
+        waiting = waiting_question(posts_of(db, tid), members)
         if waiting is not None:
             found.append(Pending(tid, kind, task_id, waiting, members))
     return found
@@ -144,11 +144,11 @@ def chat_notices(
     support = [p.id for p in org.with_role(Role.SUPPORT)]
     for tid, kind, task_id, _ in _threads(db):
         members = members_of(db, tid)
-        posts = _posts(db, tid)
+        posts = posts_of(db, tid)
         ref = task_id if kind == "task" else f"SUPPORT-{tid[:8]}"
         for index, current in enumerate(posts):
             messages += _post_notices(kind, ref, current, posts[index + 1 :], members, org)
-        waiting = _waiting(posts, members)
+        waiting = waiting_question(posts, members)
         if waiting is None:
             continue
         sla = team.support_sla_days if kind == "support" else team.chat_sla_days
@@ -179,7 +179,7 @@ def _threads(db: sqlite3.Connection) -> list[tuple[str, ThreadKind, str, str]]:
     return list(rows.fetchall())
 
 
-def _posts(db: sqlite3.Connection, thread: str) -> list[Post]:
+def posts_of(db: sqlite3.Connection, thread: str) -> list[Post]:
     rows = db.execute(
         "SELECT message_id, thread_id, author_id, body, posted_on, flagged, quote "
         "FROM chat_messages WHERE thread_id = ? ORDER BY posted_on, rowid",
@@ -188,7 +188,7 @@ def _posts(db: sqlite3.Connection, thread: str) -> list[Post]:
     return [Post(m, t, a, b, date.fromisoformat(d), bool(f), q) for m, t, a, b, d, f, q in rows]
 
 
-def _waiting(posts: list[Post], members: Mapping[str, str]) -> Post | None:
+def waiting_question(posts: list[Post], members: Mapping[str, str]) -> Post | None:
     """The oldest question since the last answer; ``None`` when nothing is waiting."""
     waiting: Post | None = None
     for current in posts:
