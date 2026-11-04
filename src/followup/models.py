@@ -23,6 +23,8 @@ class Decision(StrEnum):
     REQUEST_ETA = "request_eta"
     CLARIFY = "clarify_missing_info"
     ESCALATE = "escalate"
+    # Any team-layer message (new task, completion check, chat, ...); the kind is in the reason.
+    NOTIFY = "notify"
 
 
 class Blocker(StrEnum):

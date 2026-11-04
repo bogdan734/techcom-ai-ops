@@ -42,11 +42,13 @@ _DEPARTMENT_TABLES = Step(
     "001-tables",
     """
     CREATE TABLE task_history (
-        task_id    TEXT NOT NULL,
-        spec_hash  TEXT NOT NULL,
-        spec       TEXT NOT NULL,
-        first_seen TEXT NOT NULL,
-        PRIMARY KEY (task_id, spec_hash)
+        task_id       TEXT NOT NULL,
+        field         TEXT NOT NULL CHECK (field IN ('spec', 'status')),
+        value         TEXT NOT NULL,
+        detail        TEXT NOT NULL DEFAULT '',
+        first_seen    TEXT NOT NULL,
+        on_activation INTEGER NOT NULL,
+        PRIMARY KEY (task_id, field, value)
     );
     CREATE TABLE pins (
         key     TEXT PRIMARY KEY,
