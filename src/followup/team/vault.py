@@ -115,6 +115,13 @@ class Vault:
             base_version,
         )
 
+    def meta(self, name: str, key: str) -> str | None:
+        """One value from a file's ``meta`` table; the file has to pass ``check`` first."""
+        self.check(name)
+        with closing(self._connect(self.path(name), "ro")) as db:
+            row = db.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
+        return row[0] if row else None
+
     def migrate(self, name: str) -> tuple[str, ...]:
         """Apply pending steps, each after a backup and in one transaction."""
         status = self.check(name)
