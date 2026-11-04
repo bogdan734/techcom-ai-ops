@@ -103,6 +103,9 @@ _DEPARTMENT_TABLES = Step(
     CREATE TABLE thread_members (
         thread_id TEXT NOT NULL,
         person_id TEXT NOT NULL,
+        role      TEXT NOT NULL CHECK (
+            role IN ('assignee', 'issuer', 'asker', 'support', 'assistant')
+        ),
         PRIMARY KEY (thread_id, person_id)
     );
     CREATE TABLE chat_messages (
