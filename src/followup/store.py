@@ -56,9 +56,13 @@ CREATE TABLE IF NOT EXISTS note_readings (
 );
 """
 
+# A row sent before sent_on existed, or by an older version of the service that shares the file,
+# has no evaluation date. The day of its last update is the closest record, so the reminder
+# cadence counts from it.
 _ACTION_COLUMNS = (
     "action_id, task_id, decision, target, reason, message, drafted_by, "
-    "status, attempts, failures, message_id, last_error, sent_on"
+    "status, attempts, failures, message_id, last_error, "
+    "COALESCE(sent_on, CASE WHEN status = 'sent' THEN substr(updated_at, 1, 10) END)"
 )
 
 # Every column of the actions table. A rebuild carries over the ones the old table had, and the
@@ -88,14 +92,6 @@ _RENAME_OLD_TABLE = """
 DROP INDEX IF EXISTS actions_task;
 ALTER TABLE actions RENAME TO actions_old;
 """
-
-# A row sent before sent_on existed has no evaluation date. The day of its last update is the
-# closest record, so the cadence can count from it; running this on every rebuild is harmless
-# because it only fills gaps.
-_BACKFILL_SENT_ON = (
-    "UPDATE actions SET sent_on = substr(updated_at, 1, 10) "
-    "WHERE status = 'sent' AND sent_on IS NULL;"
-)
 
 
 @dataclass(frozen=True)
@@ -292,7 +288,7 @@ def _ensure_schema(db: sqlite3.Connection) -> None:
         before = _RENAME_OLD_TABLE
         after = (
             f"INSERT INTO actions ({shared}) SELECT {shared} FROM actions_old; "
-            f"DROP TABLE actions_old; {_BACKFILL_SENT_ON}"
+            "DROP TABLE actions_old;"
         )
     # executescript commits an open transaction before it runs, so BEGIN and COMMIT have to be in
     # the script for the setup to be all or nothing; `with db` rolls it back if a statement fails.

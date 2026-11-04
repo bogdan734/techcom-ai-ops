@@ -344,3 +344,16 @@ def test_migration_backfills_sent_on_for_sent_actions(tmp_path):
         # The submitted version recorded no delivery date: the day of the last update stands in.
         assert store.get_action("sent-1").sent_on == date(2026, 10, 21)
         assert store.get_action("failed-1").sent_on is None
+
+
+def test_a_sent_row_written_without_sent_on_reads_the_day_of_its_update(tmp_path):
+    with closing(Store(tmp_path / "state.db")) as store:
+        store.claim(action("act-1"))
+        # What an older version of the service leaves behind in a file it shares with this one.
+        store.db.execute(
+            "UPDATE actions SET status = 'sent', sent_on = NULL, updated_at = ? "
+            "WHERE action_id = 'act-1'",
+            ("2026-10-19T08:00:00+00:00",),
+        )
+
+        assert store.get_action("act-1").sent_on == date(2026, 10, 19)
