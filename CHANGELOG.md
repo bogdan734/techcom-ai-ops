@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased (branch `team-layer`)
+## Unreleased
 
 Everything below is opt-in. With no org file and no new setting, a run produces the same
 `decisions.json`, delivery log and audit events as the submitted version (`b67e0c6`); a test and
