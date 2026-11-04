@@ -58,6 +58,11 @@ def build_parser() -> argparse.ArgumentParser:
     requeue_cmd = commands.add_parser("requeue", help="release dead letters for the next run")
     requeue_cmd.add_argument("action_ids", nargs="+", metavar="ACTION_ID", help="see `list dead`")
     _add_out(requeue_cmd)
+    approve_cmd = commands.add_parser("approve", help="release escalations waiting for approval")
+    approve_cmd.add_argument(
+        "action_ids", nargs="+", metavar="ACTION_ID", help="see `list awaiting_approval`"
+    )
+    _add_out(approve_cmd)
     return parser
 
 
@@ -82,8 +87,8 @@ def _add_out(command: argparse.ArgumentParser) -> None:
 
 
 def _out_dir(args: argparse.Namespace) -> Path:
-    # list and requeue need the directory and nothing else, so an unrelated bad setting (a
-    # missing API key, say) cannot keep an operator from the parked actions.
+    # list, requeue and approve need the directory and nothing else, so an unrelated bad setting
+    # (a missing API key, say) cannot keep an operator from the parked actions.
     return Path(args.out or os.environ.get("OUT_DIR") or DEFAULT_OUT_DIR)
 
 
@@ -99,7 +104,7 @@ def _settings(args: argparse.Namespace) -> Settings:
 
 
 def _state_command(args: argparse.Namespace, out_dir: Path) -> int:
-    """``list`` and ``requeue`` work on the state a run left behind, never on a new one."""
+    """``list``, ``requeue`` and ``approve`` act on the state a run left, never on a new one."""
     state = out_dir / "state.db"
     if not state.exists():
         # A Store would create an empty database, and a mistyped --out would go unnoticed.
@@ -108,6 +113,8 @@ def _state_command(args: argparse.Namespace, out_dir: Path) -> int:
     with closing(Store(state)) as store:
         if args.command == "list":
             return _list(store, args.status)
+        if args.command == "approve":
+            return _approve(store, out_dir / "audit.jsonl", args.action_ids)
         return _requeue(store, out_dir / "audit.jsonl", args.action_ids)
 
 
@@ -136,6 +143,24 @@ def _requeue(store: Store, audit_path: Path, action_ids: Sequence[str]) -> int:
                 )
             else:
                 print(f"followup: {action_id} is not a dead letter", file=sys.stderr)
+                code = 1
+    return code
+
+
+def _approve(store: Store, audit_path: Path, action_ids: Sequence[str]) -> int:
+    # An approval lets an escalation go out, so the audit trail records who gave it.
+    code = 0
+    with run_logging(audit_path, uuid.uuid4().hex[:12]):
+        for action_id in action_ids:
+            if store.approve(action_id):
+                emit(
+                    "action_approved",
+                    f"{action_id}: approved, the next run sends it",
+                    action_id=action_id,
+                    by=getpass.getuser(),
+                )
+            else:
+                print(f"followup: {action_id} is not waiting for approval", file=sys.stderr)
                 code = 1
     return code
 

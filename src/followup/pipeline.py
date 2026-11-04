@@ -47,6 +47,8 @@ class RunReport:
         """0 all done, 1 run aborted, 2 finished but some follow-ups still owe delivery."""
         if self.aborted:
             return 1
+        # awaiting_approval is left out on purpose: a queue that waits for people must not fail a
+        # scheduled run, so the run summary lists those escalations instead.
         unsettled = {"failed", "deferred", "dead"}
         return 2 if any(o.delivery in unsettled for o in self.outcomes) else 0
 
@@ -64,6 +66,7 @@ class FollowUpService:
         reader: NoteReader,
         drafter: Drafter,
         outbox: Outbox | None,
+        approve_escalations: bool,
     ):
         self.today = today
         self.policy = policy
@@ -71,6 +74,7 @@ class FollowUpService:
         self.reader = reader
         self.drafter = drafter
         self.outbox = outbox
+        self.approve_escalations = approve_escalations
 
     def process(self, tasks: Sequence[Task]) -> list[TaskOutcome]:
         people = {task.owner for task in tasks if task.owner}
@@ -149,8 +153,36 @@ class FollowUpService:
             message, drafted_by = stored.action.message, stored.action.drafted_by
         else:
             message, drafted_by = self.drafter.draft(task, assessment, verdict, people, flagged)
+        action = Action(
+            action_id=outcome.action_id,
+            task_id=task.task_id,
+            decision=verdict.decision,
+            target=verdict.target,
+            reason=verdict.reason,
+            message=message,
+            drafted_by=drafted_by,
+        )
+        if stored is None and self.approve_escalations and verdict.decision is Decision.ESCALATE:
+            # An escalation cannot be recalled, so a person sees its wording before it goes out.
+            # If another run stored the action first, its row decides: pending goes on to the
+            # outbox below, and a sent one is suppressed there.
+            stored = self.store.claim(action, "awaiting_approval")
+            if stored.status == "awaiting_approval":
+                emit(
+                    "approval_requested",
+                    f"{task.task_id}: {verdict.decision.value} -> {verdict.target}: "
+                    f"waiting for approval (followup approve {outcome.action_id})",
+                    level=logging.WARNING,
+                    task_id=task.task_id,
+                    action_id=outcome.action_id,
+                    target=verdict.target,
+                )
+                outcome.message = stored.action.message
+                outcome.drafted_by = stored.action.drafted_by
+                outcome.delivery = stored.status
+                return outcome
         if self.outbox is None:
-            # Dry run: there is no outbox, so nothing can be claimed or posted.
+            # Dry run: there is no outbox, so nothing can be posted.
             emit(
                 "would_send",
                 f"{task.task_id}: {verdict.decision.value} -> {verdict.target}: "
@@ -164,17 +196,7 @@ class FollowUpService:
             outcome.drafted_by = drafted_by
             outcome.delivery = "would_send"
             return outcome
-        delivery = self.outbox.deliver(
-            Action(
-                action_id=outcome.action_id,
-                task_id=task.task_id,
-                decision=verdict.decision,
-                target=verdict.target,
-                reason=verdict.reason,
-                message=message,
-                drafted_by=drafted_by,
-            )
-        )
+        delivery = self.outbox.deliver(action)
         outcome.message = delivery.action.message
         outcome.drafted_by = delivery.action.drafted_by
         outcome.delivery = delivery.status
@@ -267,6 +289,7 @@ def run(
                     NoteReader(gateway, store),
                     Drafter(gateway, settings.today),
                     outbox,
+                    settings.approve_escalations,
                 )
                 report.outcomes = service.process(tasks)
                 report.llm = gateway.usage
@@ -316,6 +339,16 @@ def summarise(report: RunReport, settings: Settings, seconds: float) -> None:
             level=logging.WARNING,
             status="dead",
             actions=[{"task_id": o.task_id, "action_id": o.action_id} for o in dead],
+        )
+    waiting = [o for o in report.outcomes if o.delivery == "awaiting_approval"]
+    if waiting:
+        emit(
+            "needs_attention",
+            f"{len(waiting)} escalation(s) wait for approval; review them with "
+            "`followup list awaiting_approval`, release one with `followup approve ACTION_ID`",
+            level=logging.WARNING,
+            status="awaiting_approval",
+            actions=[{"task_id": o.task_id, "action_id": o.action_id} for o in waiting],
         )
     emit(
         "run_finished",

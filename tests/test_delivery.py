@@ -244,3 +244,14 @@ def test_requeued_action_is_reconciled_before_any_resend(store):
 
     assert again.status == "reconciled"
     assert len(posts(backend)) == 1
+
+
+def test_outbox_never_posts_an_action_awaiting_approval(store):
+    backend = MockBackend([])
+    store.claim(action(), "awaiting_approval")
+
+    delivery = outbox(store, backend).deliver(action())
+
+    assert delivery.status == "awaiting_approval"
+    assert backend.calls == []  # not even a lookup
+    assert store.get_action("act-1").status == "awaiting_approval"

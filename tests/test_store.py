@@ -249,3 +249,35 @@ def test_requeue_releases_only_dead_actions(tmp_path):
         # Attempts stay, so the next run asks the provider before it resends anything.
         assert (released.status, released.failures, released.attempts) == ("pending", 0, 2)
         assert store.requeue("pending-1") is False
+
+
+def test_submitted_database_accepts_awaiting_approval(tmp_path):
+    path = tmp_path / "state.db"
+    submitted_db(path)
+
+    with closing(Store(path)) as store:
+        # The rebuilt CHECK has to take the new status, and the rows from before have to survive.
+        store.claim(action("waiting-1"), "awaiting_approval")
+        assert store.get_action("waiting-1").status == "awaiting_approval"
+        assert store.get_action("sent-1").status == "sent"
+        assert store.approve("waiting-1") is True
+
+
+def test_approve_releases_only_waiting_actions(tmp_path):
+    with closing(Store(tmp_path / "state.db")) as store:
+        store.claim(action("waiting-1"), "awaiting_approval")
+        store.claim(action("pending-1"))
+        store.claim(action("dead-1"))
+        store.mark_dead("dead-1", "HTTP 400")
+
+        assert store.approve("waiting-1") is True
+        released = store.get_action("waiting-1")
+        # The reviewed wording is untouched, and nothing was posted yet, so there are no attempts.
+        assert (released.status, released.attempts, released.action) == (
+            "pending",
+            0,
+            action("waiting-1"),
+        )
+        for action_id in ("waiting-1", "pending-1", "dead-1", "unknown"):
+            assert store.approve(action_id) is False
+        assert store.get_action("dead-1").status == "dead"

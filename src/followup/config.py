@@ -30,6 +30,7 @@ class Settings:
     price_input_per_mtok: float
     price_output_per_mtok: float
     max_failed_runs: int
+    approve_escalations: bool
     policy: Policy
 
     @classmethod
@@ -46,6 +47,12 @@ class Settings:
             if value < 0:
                 raise ConfigError(f"{name} must not be negative")
             return value
+
+        def flag(name: str) -> bool:
+            raw = text(name, "false")
+            if raw.lower() not in ("true", "false", "1", "0"):
+                raise ConfigError(f"{name}={raw!r} is not true, false, 1 or 0")
+            return raw.lower() in ("true", "1")
 
         provider = text("LLM_PROVIDER", "stub")
         if provider not in PROVIDERS:
@@ -65,6 +72,7 @@ class Settings:
             price_input_per_mtok=number("LLM_PRICE_INPUT_PER_MTOK", 4.0),
             price_output_per_mtok=number("LLM_PRICE_OUTPUT_PER_MTOK", 20.0),
             max_failed_runs=number("MAX_FAILED_RUNS", 0, int),
+            approve_escalations=flag("APPROVE_ESCALATIONS"),
             policy=Policy(
                 escalate_after_days=number("ESCALATE_AFTER_DAYS", 5, int),
                 stale_after_days=number("STALE_AFTER_DAYS", 5, int),

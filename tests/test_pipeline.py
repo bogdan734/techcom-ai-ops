@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from contextlib import closing
 from dataclasses import replace
 from datetime import date
 
@@ -13,6 +14,7 @@ from conftest import FIXTURE, TODAY, RecordingStub, ScriptedLLM, no_wait_policy
 from followup.config import Settings
 from followup.llm import LLMError
 from followup.pipeline import run
+from followup.store import Store
 
 EXPECTED = {
     "TC-1001": ("follow_up_owner", "John Smith"),
@@ -350,3 +352,79 @@ def test_dry_run_reports_a_dead_letter_instead_of_predicting_a_send(settings):
 
     assert delivery_of(report, "TC-1001") == "dead"
     assert report.exit_code == 2
+
+
+def outcome_of(report, task_id: str):
+    return next(o for o in report.outcomes if o.task_id == task_id)
+
+
+def audit_events(settings, report) -> list[dict]:
+    lines = (settings.out_dir / "audit.jsonl").read_text().splitlines()
+    return [e for e in map(json.loads, lines) if e["run_id"] == report.run_id]
+
+
+def approve(settings, action_id: str) -> None:
+    with closing(Store(settings.out_dir / "state.db")) as store:
+        assert store.approve(action_id)
+
+
+@pytest.fixture
+def gated(settings):
+    return replace(settings, approve_escalations=True)
+
+
+def test_escalation_waits_for_approval_and_the_rest_go_out(gated):
+    report = go(gated)
+
+    assert delivery_of(report, "TC-1008") == "awaiting_approval"
+    assert [o.delivery for o in report.outcomes].count("sent") == 6
+    assert report.exit_code == 0
+    assert "TC-1008" not in {m["task_id"] for m in delivered(gated)}
+    events = audit_events(gated, report)
+    assert [e["task_id"] for e in events if e["event"] == "approval_requested"] == ["TC-1008"]
+    attention = [e for e in events if e["event"] == "needs_attention"]
+    assert [(e["status"], [a["task_id"] for a in e["actions"]]) for e in attention] == [
+        ("awaiting_approval", ["TC-1008"])
+    ]
+
+
+def test_approved_escalation_goes_out_once_with_the_reviewed_wording(gated):
+    reviewed = outcome_of(go(gated), "TC-1008")
+    approve(gated, reviewed.action_id)
+    llm = RecordingStub()
+
+    second = go(gated, llm=llm)
+    third = go(gated)
+
+    sent = outcome_of(second, "TC-1008")
+    assert (sent.delivery, sent.message) == ("sent", reviewed.message)
+    # Drafting again could word it differently from what the reviewer approved.
+    assert llm.requests == []
+    log = delivered(gated)
+    assert [m["body"] for m in log if m["task_id"] == "TC-1008"] == [reviewed.message]
+    assert delivery_of(third, "TC-1008") == "duplicate_suppressed"
+    assert len(log) == len({m["idempotency_key"] for m in log}) == 7
+
+
+def test_waiting_escalation_is_not_redrafted(gated):
+    first = go(gated)
+    llm = RecordingStub()
+
+    second = go(gated, llm=llm)
+
+    assert llm.requests == []
+    waiting, earlier = outcome_of(second, "TC-1008"), outcome_of(first, "TC-1008")
+    assert (waiting.delivery, waiting.message) == ("awaiting_approval", earlier.message)
+    assert second.exit_code == 0
+    names = [e["event"] for e in audit_events(gated, second)]
+    assert "approval_requested" not in names  # asked for once, on the first run
+    assert "needs_attention" in names  # but every run summary still lists what is waiting
+
+
+def test_dry_run_reports_an_escalation_as_awaiting_approval(gated):
+    report = dry_run(gated)
+
+    assert delivery_of(report, "TC-1008") == "awaiting_approval"
+    assert [o.delivery for o in report.outcomes].count("would_send") == 6
+    assert report.exit_code == 0
+    assert not (gated.out_dir / "state.db").exists()

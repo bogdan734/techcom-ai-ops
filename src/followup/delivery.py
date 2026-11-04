@@ -25,7 +25,7 @@ from .store import PARKED_STATUSES, Store
 
 @dataclass(frozen=True)
 class Delivery:
-    # sent | reconciled | duplicate_suppressed | failed | deferred | dead
+    # sent | reconciled | duplicate_suppressed | failed | deferred | dead | awaiting_approval
     status: str
     # The stored action this outcome is about: when another run claimed it first, its wording
     # is what went out, not the caller's.

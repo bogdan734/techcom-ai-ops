@@ -13,16 +13,16 @@ from contextlib import closing
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from .models import Action, Decision
 
 # Kept in PRAGMA user_version and raised whenever SCHEMA changes. The submitted version never set
 # it, so its databases read as 0.
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 # Statuses of actions that are never posted: they wait for a person.
-PARKED_STATUSES: frozenset[str] = frozenset({"dead"})
+PARKED_STATUSES: frozenset[str] = frozenset({"dead", "awaiting_approval"})
 
 # attempts counts requests, which vary with retries and reconciliation; failures counts the runs
 # that ended without delivering, which is what the dead-letter limit is about.
@@ -35,7 +35,8 @@ CREATE TABLE IF NOT EXISTS actions (
     reason      TEXT NOT NULL,
     message     TEXT NOT NULL,
     drafted_by  TEXT NOT NULL,
-    status      TEXT NOT NULL CHECK (status IN ('pending', 'sent', 'failed', 'dead')),
+    status      TEXT NOT NULL
+                CHECK (status IN ('pending', 'sent', 'failed', 'dead', 'awaiting_approval')),
     attempts    INTEGER NOT NULL DEFAULT 0,
     failures    INTEGER NOT NULL DEFAULT 0,
     message_id  TEXT,
@@ -124,17 +125,20 @@ class Store:
         ).fetchone()
         return _stored(row) if row else None
 
-    def claim(self, action: Action) -> StoredAction:
-        """Record the action as pending unless it is already known; return what is stored.
+    def claim(
+        self, action: Action, status: Literal["pending", "awaiting_approval"] = "pending"
+    ) -> StoredAction:
+        """Record the action under ``status`` unless it is already known; return what is stored.
 
         The returned row wins over the argument: if another run claimed the same action
-        first, its message is the one that must go out under this idempotency key.
+        first, its message is the one that must go out under this idempotency key, and its
+        status is the one that counts.
         """
         now = _now()
         self.db.execute(
             "INSERT OR IGNORE INTO actions (action_id, task_id, decision, target, reason, "
             "message, drafted_by, status, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)",
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 action.action_id,
                 action.task_id,
@@ -143,6 +147,7 @@ class Store:
                 action.reason,
                 action.message,
                 action.drafted_by,
+                status,
                 now,
                 now,
             ),
@@ -208,6 +213,19 @@ class Store:
         released = self.db.execute(
             "UPDATE actions SET status = 'pending', failures = 0, updated_at = ? "
             "WHERE action_id = ? AND status = 'dead'",
+            (_now(), action_id),
+        )
+        return released.rowcount == 1
+
+    def approve(self, action_id: str) -> bool:
+        """Release an escalation held for approval; False if it is not waiting.
+
+        Nothing else changes: it was never posted, so from here the outbox treats it like any
+        pending action, and the wording a person reviewed is the wording that goes out.
+        """
+        released = self.db.execute(
+            "UPDATE actions SET status = 'pending', updated_at = ? "
+            "WHERE action_id = ? AND status = 'awaiting_approval'",
             (_now(), action_id),
         )
         return released.rowcount == 1

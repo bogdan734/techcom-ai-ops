@@ -4,8 +4,11 @@ import getpass
 import json
 from contextlib import closing
 
+import pytest
+
 from conftest import FIXTURE
 from followup.cli import main
+from followup.config import Settings
 from followup.models import Action, Decision
 from followup.store import Store
 
@@ -132,3 +135,43 @@ def test_state_commands_ignore_unrelated_bad_settings(tmp_path, monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
 
     assert main(["list", "dead", "--out", str(out)]) == 0
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [("true", True), ("TRUE", True), ("1", True), ("False", False), ("0", False), ("", False)],
+)
+def test_approval_flag_accepts_true_false_1_and_0_in_any_case(raw, expected):
+    assert Settings.from_env({"APPROVE_ESCALATIONS": raw}).approve_escalations is expected
+
+
+def test_invalid_approval_flag_is_a_configuration_error(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("APPROVE_ESCALATIONS", "maybe")
+
+    code = main(["run", "--tasks", str(FIXTURE), "--today", "2026-10-21", "--out", str(tmp_path)])
+
+    assert code == 1
+    assert "APPROVE_ESCALATIONS='maybe'" in capsys.readouterr().err
+
+
+def test_approve_releases_a_waiting_escalation(tmp_path, capsys, monkeypatch):
+    out = tmp_path / "out"
+    with closing(Store(out / "state.db")) as store:
+        store.claim(action("act-waiting"), "awaiting_approval")
+    monkeypatch.setattr(getpass, "getuser", lambda: "ops")
+    # Like list and requeue, approve needs the out directory and nothing else.
+    monkeypatch.setenv("APPROVE_ESCALATIONS", "maybe")
+
+    assert main(["list", "awaiting_approval", "--out", str(out)]) == 0
+    listed = capsys.readouterr().out
+    assert "act-waiting" in listed and action("act-waiting").message in listed
+
+    assert main(["approve", "act-waiting", "--out", str(out)]) == 0
+    with closing(Store(out / "state.db")) as store:
+        assert store.get_action("act-waiting").status == "pending"
+    events = [json.loads(line) for line in (out / "audit.jsonl").read_text().splitlines()]
+    approved = [event for event in events if event["event"] == "action_approved"]
+    assert [(event["action_id"], event["by"]) for event in approved] == [("act-waiting", "ops")]
+
+    assert main(["approve", "act-waiting", "--out", str(out)]) == 1
+    assert "act-waiting is not waiting for approval" in capsys.readouterr().err
