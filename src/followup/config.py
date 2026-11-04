@@ -80,6 +80,8 @@ class Settings:
                 clarify_target=text("CLARIFY_TARGET", "project_manager"),
                 escalation_target=text("ESCALATION_TARGET", "project_manager"),
                 materials_target=text("MATERIALS_TARGET", "warehouse"),
+                remind_every_days=number("REMIND_EVERY_DAYS", 0, int),
+                max_reminders=number("MAX_REMINDERS", 2, int),
             ),
         )
 

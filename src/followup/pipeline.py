@@ -15,6 +15,7 @@ from typing import Any
 
 from .api import ApiError, MessagesApi, TasksApi
 from .audit import emit, run_logging
+from .cadence import follow_up_due
 from .config import ConfigError, Settings
 from .delivery import Outbox
 from .drafting import Drafter
@@ -24,7 +25,7 @@ from .llm import LLMClient, LLMGateway, Usage
 from .llm.anthropic_client import AnthropicClient
 from .llm.stub import StubClient
 from .mock_api import MockBackend
-from .models import Action, Decision, Task, TaskOutcome, action_id
+from .models import Action, Decision, Task, TaskOutcome
 from .normalize import normalise_all
 from .notes import NoteReader
 from .retry import CircuitBreaker, RetryPolicy
@@ -90,6 +91,11 @@ class FollowUpService:
         # The note decides who hears about this task; without a trustworthy reading the
         # service holds it rather than acting on a guess it might contradict next run.
         held = actionable and reading.source == "unavailable"
+        due_id = None
+        if actionable and not held:
+            # A task state that was followed up already may be due a reminder, or the final
+            # escalation, instead. A held task decides nothing, so it never gets here.
+            verdict, due_id = follow_up_due(self.store, task, verdict, self.today, self.policy)
         decision, target, reason = (
             (
                 ON_HOLD,
@@ -106,6 +112,7 @@ class FollowUpService:
             reason=reason,
             project=task.project,
             task=task.title,
+            action_id=due_id,
             delivery="deferred" if held else "none",
             note_reading={"blocker": reading.blocker.value, "source": reading.source},
             flags=[*flags, *(f"data: {issue}" for issue in task.issues)],
@@ -124,7 +131,6 @@ class FollowUpService:
         if held or not actionable:
             return outcome
 
-        outcome.action_id = action_id(task, verdict)
         stored = self.store.get_action(outcome.action_id)
         if stored is not None and stored.status == "sent":
             # Same task state, decision and recipient as a follow-up already delivered.
@@ -252,7 +258,8 @@ def run(
         backend = MockBackend(
             load_fixture(settings.tasks_file), out / "delivery_log.jsonl", faults=faults
         )
-        store = Store.snapshot(out / "state.db") if dry_run else Store(out / "state.db")
+        state = out / "state.db"
+        store = Store.snapshot(state, settings.today) if dry_run else Store(state, settings.today)
         try:
             with backend.client() as http:
                 try:

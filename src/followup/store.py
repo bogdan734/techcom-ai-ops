@@ -11,7 +11,7 @@ import json
 import sqlite3
 from contextlib import closing
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any, Literal
 
@@ -19,13 +19,14 @@ from .models import Action, Decision
 
 # Kept in PRAGMA user_version and raised whenever SCHEMA changes. The submitted version never set
 # it, so its databases read as 0.
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 # Statuses of actions that are never posted: they wait for a person.
 PARKED_STATUSES: frozenset[str] = frozenset({"dead", "awaiting_approval"})
 
 # attempts counts requests, which vary with retries and reconciliation; failures counts the runs
-# that ended without delivering, which is what the dead-letter limit is about.
+# that ended without delivering, which is what the dead-letter limit is about. sent_on is the
+# evaluation date of the run that confirmed delivery: the reminder cadence counts days from it.
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS actions (
     action_id   TEXT PRIMARY KEY,
@@ -41,6 +42,7 @@ CREATE TABLE IF NOT EXISTS actions (
     failures    INTEGER NOT NULL DEFAULT 0,
     message_id  TEXT,
     last_error  TEXT,
+    sent_on     TEXT,
     created_at  TEXT NOT NULL,
     updated_at  TEXT NOT NULL
 );
@@ -56,7 +58,7 @@ CREATE TABLE IF NOT EXISTS note_readings (
 
 _ACTION_COLUMNS = (
     "action_id, task_id, decision, target, reason, message, drafted_by, "
-    "status, attempts, failures, message_id, last_error"
+    "status, attempts, failures, message_id, last_error, sent_on"
 )
 
 # Every column of the actions table. A rebuild carries over the ones the old table had, and the
@@ -74,6 +76,7 @@ _COLUMNS = (
     "failures",
     "message_id",
     "last_error",
+    "sent_on",
     "created_at",
     "updated_at",
 )
@@ -86,6 +89,14 @@ DROP INDEX IF EXISTS actions_task;
 ALTER TABLE actions RENAME TO actions_old;
 """
 
+# A row sent before sent_on existed has no evaluation date. The day of its last update is the
+# closest record, so the cadence can count from it; running this on every rebuild is harmless
+# because it only fills gaps.
+_BACKFILL_SENT_ON = (
+    "UPDATE actions SET sent_on = substr(updated_at, 1, 10) "
+    "WHERE status = 'sent' AND sent_on IS NULL;"
+)
+
 
 @dataclass(frozen=True)
 class StoredAction:
@@ -95,11 +106,14 @@ class StoredAction:
     failures: int
     message_id: str | None
     last_error: str | None
+    sent_on: date | None
 
 
 class Store:
-    def __init__(self, path: Path):
+    def __init__(self, path: Path, today: date | None = None):
         path.parent.mkdir(parents=True, exist_ok=True)
+        # The day a delivery is recorded under: the run's evaluation date, else today in UTC.
+        self.today = today or datetime.now(UTC).date()
         self.db = sqlite3.connect(path, isolation_level=None)
         # WAL lets a second run read while another writes; busy_timeout makes it wait, not fail.
         self.db.execute("PRAGMA journal_mode=WAL")
@@ -107,13 +121,14 @@ class Store:
         _ensure_schema(self.db)
 
     @classmethod
-    def snapshot(cls, path: Path) -> Store:
+    def snapshot(cls, path: Path, today: date | None = None) -> Store:
         """An in-memory copy of the state at ``path``, for a dry run: every write stays in it.
 
         The file is opened with ``mode=ro``, which SQLite enforces itself, copied and closed.
         A missing file gives an empty store, and neither the file nor its directory is created.
         """
         store = cls.__new__(cls)  # not __init__: it would create the directory and the file
+        store.today = today or datetime.now(UTC).date()
         store.db = sqlite3.connect(":memory:", isolation_level=None)
         if path.exists():
             # as_uri escapes '#', '?' and spaces; "file:" + path would open a different file.
@@ -176,8 +191,8 @@ class Store:
     def mark_sent(self, action_id: str, message_id: str | None) -> None:
         self.db.execute(
             "UPDATE actions SET status = 'sent', message_id = ?, last_error = NULL, "
-            "updated_at = ? WHERE action_id = ?",
-            (message_id, _now(), action_id),
+            "sent_on = ?, updated_at = ? WHERE action_id = ?",
+            (message_id, self.today.isoformat(), _now(), action_id),
         )
 
     def mark_failed(self, action_id: str, error: str) -> int:
@@ -273,7 +288,7 @@ def _ensure_schema(db: sqlite3.Connection) -> None:
         before = _RENAME_OLD_TABLE
         after = (
             f"INSERT INTO actions ({shared}) SELECT {shared} FROM actions_old; "
-            "DROP TABLE actions_old;"
+            f"DROP TABLE actions_old; {_BACKFILL_SENT_ON}"
         )
     # executescript commits an open transaction before it runs, so BEGIN and COMMIT have to be in
     # the script for the setup to be all or nothing; `with db` rolls it back if a statement fails.
@@ -284,7 +299,7 @@ def _ensure_schema(db: sqlite3.Connection) -> None:
 
 def _stored(row: tuple[Any, ...]) -> StoredAction:
     action_id, task_id, decision, target, reason, message, drafted_by = row[:7]
-    status, attempts, failures, message_id, last_error = row[7:]
+    status, attempts, failures, message_id, last_error, sent_on = row[7:]
     return StoredAction(
         action=Action(
             action_id=action_id,
@@ -300,6 +315,7 @@ def _stored(row: tuple[Any, ...]) -> StoredAction:
         failures=failures,
         message_id=message_id,
         last_error=last_error,
+        sent_on=date.fromisoformat(sent_on) if sent_on else None,
     )
 
 

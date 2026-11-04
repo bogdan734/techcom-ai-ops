@@ -96,20 +96,23 @@ class Action:
     drafted_by: str
 
 
-def action_id(task: Task, verdict: Verdict) -> str:
+def action_id(task: Task, verdict: Verdict, repeat: int = 0) -> str:
     """Stable operation identity: same task state, decision and recipient -> same id.
 
     The message text is deliberately not part of it: drafts differ between runs, and a
-    re-worded draft of the same follow-up is still the same follow-up.
+    re-worded draft of the same follow-up is still the same follow-up. A reminder is another
+    message about the same state, so each repeat gets its own id; repeat 0 leaves the payload
+    as it was, which keeps every id stored before reminders existed.
     """
-    return _digest(
-        {
-            "task_id": task.task_id,
-            "decision": verdict.decision.value,
-            "target": verdict.target,
-            "state": task.fingerprint(),
-        }
-    )
+    payload: dict[str, object] = {
+        "task_id": task.task_id,
+        "decision": verdict.decision.value,
+        "target": verdict.target,
+        "state": task.fingerprint(),
+    }
+    if repeat:
+        payload["repeat"] = repeat
+    return _digest(payload)
 
 
 @dataclass

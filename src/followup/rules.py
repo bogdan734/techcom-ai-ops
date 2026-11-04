@@ -22,6 +22,10 @@ class Policy:
     clarify_target: str = "project_manager"
     escalation_target: str = "project_manager"
     materials_target: str = "warehouse"
+    # 0 = no reminders: a follow-up goes out once per task state. Otherwise the days between
+    # rounds, and the number of reminders before the final escalation.
+    remind_every_days: int = 0
+    max_reminders: int = 2
 
 
 @dataclass(frozen=True)
@@ -116,6 +120,16 @@ def decide(assessment: Assessment, blocker: Blocker, policy: Policy) -> Verdict:
     # Complete data guarantees a due date here, and overdue work returned above.
     return Verdict(
         Decision.NO_ACTION, "On track, due " + ("today" if due_in == 0 else f"in {days(due_in)}")
+    )
+
+
+def final_escalation(verdict: Verdict, policy: Policy) -> Verdict:
+    """The end of a cadence: the reminders changed nothing, so the escalation target is told."""
+    return Verdict(
+        Decision.ESCALATE,
+        f"{verdict.reason}, unchanged after {policy.max_reminders} reminder(s)",
+        policy.escalation_target,
+        "role",
     )
 
 

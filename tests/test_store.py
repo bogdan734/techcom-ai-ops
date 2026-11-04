@@ -6,6 +6,7 @@ import hashlib
 import json
 import sqlite3
 from contextlib import closing
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -322,3 +323,24 @@ def test_approve_releases_only_waiting_actions(tmp_path):
         for action_id in ("waiting-1", "pending-1", "dead-1", "unknown"):
             assert store.approve(action_id) is False
         assert store.get_action("dead-1").status == "dead"
+
+
+def test_mark_sent_records_the_evaluation_date(tmp_path):
+    # A date far from the wall clock: the cadence counts evaluation days, not real ones.
+    with closing(Store(tmp_path / "state.db", date(2026, 10, 23))) as store:
+        store.claim(action("act-1"))
+        assert store.get_action("act-1").sent_on is None
+
+        store.mark_sent("act-1", "msg-0001")
+
+        assert store.get_action("act-1").sent_on == date(2026, 10, 23)
+
+
+def test_migration_backfills_sent_on_for_sent_actions(tmp_path):
+    path = tmp_path / "state.db"
+    submitted_db(path)
+
+    with closing(Store(path)) as store:
+        # The submitted version recorded no delivery date: the day of the last update stands in.
+        assert store.get_action("sent-1").sent_on == date(2026, 10, 21)
+        assert store.get_action("failed-1").sent_on is None
