@@ -121,9 +121,10 @@ def _state_command(args: argparse.Namespace, out_dir: Path) -> int:
 def _list(store: Store, status: str) -> int:
     for stored in store.actions_in(status):
         action = stored.action
+        error = stored.last_error or "-"
         print(
             f"{action.action_id} {action.task_id} {action.decision.value} -> {action.target} | "
-            f"attempts {stored.attempts}, failed runs {stored.failures} | {stored.last_error}"
+            f"attempts {stored.attempts}, failed runs {stored.failures} | {error}"
         )
         print(indent(action.message, "    "))
     return 0

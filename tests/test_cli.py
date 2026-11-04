@@ -175,3 +175,12 @@ def test_approve_releases_a_waiting_escalation(tmp_path, capsys, monkeypatch):
 
     assert main(["approve", "act-waiting", "--out", str(out)]) == 1
     assert "act-waiting is not waiting for approval" in capsys.readouterr().err
+
+
+def test_list_shows_a_dash_for_an_action_without_an_error(tmp_path, capsys):
+    out = tmp_path / "out"
+    with closing(Store(out / "state.db")) as store:
+        store.claim(action("act-waiting"), "awaiting_approval")
+
+    assert main(["list", "awaiting_approval", "--out", str(out)]) == 0
+    assert "attempts 0, failed runs 0 | -\n" in capsys.readouterr().out
